@@ -81,7 +81,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         WriteResults "Red" " -  - 16GB RAM = 24576MB Page File | 8GB RAM =  12288MB Page File" "" ""
         WriteResults "Red" " -  - 6GB RAM =  9216MB Page File | 2GB RAM =  3072MB Page File" "" ""
     }
-    else {WriteResults "Green" "Check Min-Max Size" "" ""}
+    else {WriteResults "Red" "Check Min-Max Size" "" ""}
 
     Add-Content "$ResultsPath\$HTMLFile" $HTMLOuputEnd
 }
