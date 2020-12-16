@@ -14,10 +14,18 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
     Function WriteResults ($Color,$String1,$String2,$String3){
         if ($Color -eq "Green") {$HtmlColor = "008000"; $ConsColor = "Green"}
         elseif ($Color -eq "Red") {$HtmlColor = "F00000"; $ConsColor = "Red"}
+        elseif ($Color -eq "Yellow") {$HtmlColor = "FFC000"; $ConsColor = "Yellow"}
         else {$HtmlColor = "000000"; $ConsColor = "White"}
         Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`">$String1 $String2 $String3</font>"
         Add-Content -Path "$ResultsPath\$CsvFile" "$String1,$String2,$String3"
         Write-Host -ForegroundColor $ConsColor $String1 $String2 $String3
+    }
+    Function WritePFNotice($Color){
+        WriteResults $Color "It is recommended to configure the Swap File with an Inital and Max size of 1.5 x Memory" "" ""
+        WriteResults $Color " - Use the below sizes to set the Swap File accordingly " "" ""
+        WriteResults $Color " -  - 16GB RAM = 24576MB Page File | 12GB RAM = 18432MB Page File | 8GB RAM =  12288MB Page File" "" ""
+        WriteResults $Color " -  -  6GB RAM =  9216MB Page File |  4GB RAM =  6144MB Page File | 2GB RAM =  3072MB Page File" "" ""
+        WriteResults $Color " -  -  Note that Page File changes typically require a reboot" "" ""
     }
     #Write Server name to results
     WriteResults "Default" "Server -" $_ ""
@@ -75,13 +83,38 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
     else {WriteResults "Red" "WMI SNMP Provider NOT Installed" "- Should be installed" ""}
 
     #Check Page file is hard set to 1.5x RAM size
+    $MemSzMB = [Math]::Ceiling((gwmi win32_computersystem -ComputerName $_  | select -ExpandProperty TotalPhysicalMemory) / 1048576 )
     if ((Get-WmiObject win32_computersystem -ComputerName $_ | select -expand AutomaticManagedPagefile) -eq "True"){
-        WriteResults "Red" "It is recommended to configure the Swap File with an Inital and Max size of 1.5 x Memory" "" ""
-        WriteResults "Red" " - Use the below sizes to set the Swap File accordingly " "" ""
-        WriteResults "Red" " -  - 16GB RAM = 24576MB Page File | 8GB RAM =  12288MB Page File" "" ""
-        WriteResults "Red" " -  - 6GB RAM =  9216MB Page File | 2GB RAM =  3072MB Page File" "" ""
+        WriteResults "Red" "Page File Configred to be managed by system" "" ""
+        WritePFNotice "Red"
     }
-    else {WriteResults "Red" "Check Min-Max Size" "" ""}
+    else{
+        $PfSettings = Get-CimInstance -Class Win32_PageFileSetting -ComputerName $_
+        $PfRangeLow = $MemSzMB*1.4 ; $PfRangeHigh = $MemSzMB*1.6
+        #Write-Host $PfSettings.InitialSize $PfSettings.MaximumSize
+        if ($PfSettings.InitialSize -eq $PfSettings.MaximumSize){
+            if (($PfSettings.MaximumSize -gt $PfRangeLow) -and ($PfSettings.MaximumSize -lt $PfRangeHigh)){
+                WriteResults "Green" "Page File Configred to best practices" "" ""
+            }
+            elseif(($PfSettings.MaximumSize -gt $PfRangeLow) -and ($PfSettings.MaximumSize -gt $PfRangeHigh)){
+                WriteResults "Yellow" "Page File Configred larger than typical installs" "" ""
+                WritePFNotice "Yellow"
+            }
+            else{
+                WriteResults "Red" "Page File Size Should be increased" "" ""
+                WritePFNotice "Red"
+            }
+        }
+        elseif($PfSettings.InitialSize -lt $PfRangeLow){
+            WriteResults "Red" "Page File Size Should be increased and both Initial and Max Values shoufl be the same" "" ""
+            WritePFNotice "Red"
+        }
+        else{
+            WriteResults "Yellow" "Page File Size is large enough but both Initial and Max Values shoufl be the same" "" ""
+            WritePFNotice "Yellow"
+        }
+        WriteResults "Red" "Check Min-Max Size $PfInit $PfMax " "" ""
+    }
 
     Add-Content "$ResultsPath\$HTMLFile" $HTMLOuputEnd
 }
