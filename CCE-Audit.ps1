@@ -33,7 +33,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
     #Get OS version
     $OS = Get-WmiObject -Class win32_operatingsystem -ComputerName $_ | select @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | select -expand OS
     WriteResults "Default" "OS -" $OS ""
-
+    
     #Get Advanced NIC Properties
     Invoke-Command -ComputerName $_ {Get-NetAdapterAdvancedProperty} | ForEach-Object {
         if ((($_.DisplayName -like "*Off*") -and ($_.DisplayValue -like "*Disabled*")) -or (
@@ -69,7 +69,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         }
         else {WriteResults "Red" "NO AntiVirus Installed" "" ""}
     }#>
-
+    
     #Check if CD Rom drive is assigned to Z:
     if ((Get-WmiObject win32_logicaldisk -ComputerName $_ | where {$_.DriveType -eq 5} |select -expand DeviceID) -eq "z:"){
         WriteResults "Green" "CD Drive Assigned to Z:" "" ""
@@ -96,7 +96,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
             if (($PfSettings.MaximumSize -gt $PfRangeLow) -and ($PfSettings.MaximumSize -lt $PfRangeHigh)){
                 WriteResults "Green" "Page File Configred to best practices" "" ""
             }
-            elseif(($PfSettings.MaximumSize -gt $PfRangeLow) -and ($PfSettings.MaximumSize -gt $PfRangeHigh)){
+            elseif($PfSettings.MaximumSize -gt $PfRangeHigh){
                 WriteResults "Yellow" "Page File Configred larger than typical installs" "" ""
                 WritePFNotice "Yellow"
             }
@@ -115,6 +115,33 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         }
         WriteResults "Red" "Check Min-Max Size $PfInit $PfMax " "" ""
     }
+
+    #Check to see if Updates are Set to Manual
+    $reg=[Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine', $_)
+    if ($OS -like "*2016*"){
+	    $regKey=$reg.OpenSubKey("SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU")
+        $UpdateStatus = $regKey.GetValue('NoAutoUpdate')
+        if ($UpdateStatus -eq 1){
+            WriteResults "Green" "Windows Updates Set to manual" "" ""
+        }
+        else{WriteResults "Yellow" "Windows Updates enabled" "" ""}
+    }
+    elseif($OS -like "*2012*"){
+        $regKey=$reg.OpenSubKey("SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update")
+        $UpdateStatus = $regKey.GetValue('AUOptions')
+        if ($UpdateStatus -eq 1){
+            WriteResults "Green" "Windows Updates Set to manual" "" ""
+        }
+        else{WriteResults "Yellow" "Windows Updates enabled" "" ""}
+    }
+
+    #Check for recently installed updates
+    $Hotfixes = gwmi win32_quickfixengineering -ComputerName $_ ; $LastUpdate = $Hotfixes.item(($Hotfixes.length - 1)).InstalledOn
+    $Today = Get-Date ; $DateDif = $Today - $LastUpdate
+    if ($DateDif.Days -lt 60){
+        WriteResults "Green" "Windows Updates have been installed in the last 60 days" "" ""
+    }
+    else{WriteResults "Red" "NO Windows Updates have been installed in the last 60 days" "" ""}
 
     Add-Content "$ResultsPath\$HTMLFile" $HTMLOuputEnd
 }
