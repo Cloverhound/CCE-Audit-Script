@@ -13,9 +13,8 @@ $global:CredsWin = New-Object System.Management.Automation.PSCredential ($UserCr
 
 #$CredsSql
 
-
 Get-Content c:\Scripts\Servers.txt | ForEach-Object {
-    #Region Setup Vars
+    #region Setup Vars
     $ResultsPath = "C:\Temp\AuditResults"
     $HTMLFile = "$_.htm"
     $CsvFile = "$_.csv"
@@ -23,15 +22,18 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
     $HTMLOuputStart = "<html><body><br><b>UCCE/PCCE Server Audit Report.</b></body><html>
     <html><body>"
     $HTMLOuputEnd = "</body></html>"
+    $IcmInstalled = $false
+    $PorticoRunning = $false
     Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
     Set-Content -Path "$ResultsPath\$CsvFile" ""
-    #EndRegion Setup Vars
+    #endregion Setup Vars
 
-    #Region TempVars
+    #region TempVars
     $TwoNICs = $true
-    #EndRegion TempVars
+    #endregion TempVars
 
-    #Write results to CSV, html file and PowerShell window
+    #region Functions
+    #region Write results to CSV, html file and PowerShell window
     #To use function, send it the Color of the message and up to 3 strings to write to audit results
     Function WriteResults ($Color,$String1,$String2,$String3){
         if ($Color -eq "Green") {$HtmlColor = "008000"; $ConsColor = "Green"}
@@ -42,8 +44,9 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         Add-Content -Path "$ResultsPath\$CsvFile" "$String1,$String2,$String3"
         Write-Host -ForegroundColor $ConsColor $String1 $String2 $String3
     }
+    #endregion Write results to CSV, html file and PowerShell window
 
-    #Write Page file notice for malconfigured page files
+    #region Write Page file notice for malconfigured page files
     Function WritePFNotice($Color){
         WriteResults $Color " - It is recommended to configure the Swap File with an Inital and Max size of 1.5 x Memory" "" ""
         WriteResults $Color " - Use the below sizes to set the Swap File accordingly " "" ""
@@ -51,8 +54,9 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         WriteResults $Color " -  -  6GB RAM =  9216MB Page File |  4GB RAM =  6144MB Page File | 2GB RAM =  3072MB Page File" "" ""
         WriteResults $Color " -  -  Note that Page File changes typically require a reboot" "" ""
     }
+    #endregion Write Page file notice for malconfigured page files
 
-    #Make Web Request
+    #region Make Web Request
     Function MakeWebRequest ($Url){
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
         $global:WebReq = [System.Net.WebRequest]::Create($Url)
@@ -61,6 +65,8 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         $global:WebReq.Timeout = 15000
         $global:WebReq.Credentials = $CredsWin.GetNetworkCredential()
     }
+    #endregion Make Web Request
+    #endregion Functions
 
     #Write Server name to results
     WriteResults "Default" "Server -" $_ ""
@@ -72,8 +78,30 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         $OS = Get-WmiObject -Class win32_operatingsystem -ComputerName $_ | Select-Object @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | Select-Object -expand OS
         WriteResults "Default" "OS -" $OS ""
         
-        #Get Installed ICM Components
-        #Region Get Installed ICM Components
+        #region Check that Portico is installed and running
+        Get-Service -ComputerName $_ | Select-Object -property DisplayName,Status | ForEach-Object {
+            if ($_.DisplayName -like "Cisco ICM Diagnostic Framework"){
+                $global:IcmInstalled = $true
+                WriteResults "Green" "Portico is installed - Checking if it Running" "" ""
+                if (($_.DisplayName -like "Cisco ICM Diagnostic Framework")-and($_.Status -eq "Running")){
+                    $global:PorticoRunning = $true
+                    WriteResults "Green" " - Portico is installed and Running" "" ""
+                }
+                else{
+                    $PorticoRunning = $false
+                    WriteResults "Red" "Portico is installed - But NOT Running" "" ""
+                }
+            }
+            else{
+                WriteResults "Red" "Unable to find Portico Service Ensure that servername in list is correct" "" ""
+                WriteResults "Red" " - ICM must be installed on the server to be audited, only a limited audit will be run" "" ""
+                $IcmInstalled = $false
+            }
+        }
+        Write-Host $IcmInstalled $PorticoRunning
+        #endregion Check that Portico is installed and running
+
+        #region Get Installed ICM Components
         MakeWebRequest "https://$_`:7890/icm-dp/rest/DiagnosticPortal/ListAppServers"
         try {$Resp = $WebReq.GetResponse()}
         catch {$Resp = "error"}
@@ -98,15 +126,9 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
             $reader.Close()
             $resp.Close()
         }
-        #EndRegion Get Installed ICM Components
+        #endregion Get Installed ICM Components
 
-        #Check for ICM Components
-        <#$components = @{}
-        $components.Add($_, (-server $_ -creds $CredsWin))
-        WriteResults "Green" $components "" "" #>
-
-        #Get Advanced NIC Properties
-        #Region Get Advanced NIC Properties
+        #region Get Advanced NIC Properties
         Invoke-Command -ComputerName $_ {Get-NetAdapterAdvancedProperty} | ForEach-Object {
             if ((($_.DisplayName -like "*Off*") -and ($_.DisplayValue -like "*Disabled*")) -or (
                     ($_.DisplayName -like "Speed*") -and ($_.DisplayValue -like "*1.0 Gbps Full*"))){
@@ -117,9 +139,9 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
                 WriteResults "Red" $_.Name $_.DisplayName $_.DisplayValue
             }
         }
-        #EndRegion Get Advanced NIC Properties
+        #endregion Get Advanced NIC Properties
     
-        #Get Cisco ICM Services and Startup Type
+        #region Get Cisco ICM Services and Startup Type
         Get-Service -ComputerName $_ | Select-Object -property DisplayName,StartType | ForEach-Object {
             if (($_.DisplayName -like "Cisco*")-and($_.StartType -eq "Automatic")){
                 WriteResults "Green" $_.DisplayName " - " $_.StartType
@@ -128,20 +150,24 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
                 WriteResults "Red" $_.DisplayName " - " $_.StartType
             }
         }
+        #endregion Get Cisco ICM Services and Startup Type
     
-        #Check if RDP is enabled
+        #region Check if RDP is enabled
         if ((Get-WmiObject -name "root\cimv2\TerminalServices" Win32_TerminalServiceSetting -Authentication 6 -ComputerName $_ | Select-Object -expand AllowTSConnections) -eq 1){
             WriteResults "Green" "Remote Desktop Enabled" "" ""
         }
         else {WriteResults "Red" "Remote Desktop DISABLED" "" ""}
+        #enddregion Check if RDP is enabled
 
-        #Check for AntiVirus
+
+        #region Check for AntiVirus
         <#Get-WmiObject win32_product -ComputerName $_ | where {$_.Name -eq 'Microsoft Security Client'} | select -expand Name | ForEach-Object {
             if ($_ -ne ""){
                 WriteResults "Green" "AntiVirus Installed" "" ""
             }
             else {WriteResults "Red" "NO AntiVirus Installed" "" ""}
         }#>
+        #endregion
     
         #Check if CD Rom drive is assigned to Z:
         if ((Get-WmiObject win32_logicaldisk -ComputerName $_ | Where-Object {$_.DriveType -eq 5} |Select-Object -expand DeviceID) -eq "z:"){
@@ -155,8 +181,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         }
         else {WriteResults "Red" "WMI SNMP Provider NOT Installed" "- Should be installed" ""}
 
-        #Check Page file is hard set to 1.5x RAM size
-        #Region Page File Check
+        #region Check Page file is hard set to 1.5x RAM size
         $MemSzMB = [Math]::Ceiling((Get-WmiObject win32_computersystem -ComputerName $_  | Select-Object -ExpandProperty TotalPhysicalMemory) / 1048576 )
         if ((Get-WmiObject win32_computersystem -ComputerName $_ | Select-Object -expand AutomaticManagedPagefile) -eq "True"){
             WriteResults "Red" "Page File Configred to be managed by system" "" ""
@@ -188,10 +213,9 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
                 WritePFNotice "Yellow"
             }
         }
-        #EndRegion Page File Check
+        #endregion Check Page file is hard set to 1.5x RAM size
 
-        #Check to see if Updates are Set to Manual
-        #Region Manual Updates Check
+        #region Check to see if Updates are Set to Manual
         $reg=[Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine', $_)
         if ($OS -like "*2016*"){
 	        $regKey=$reg.OpenSubKey("SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU")
@@ -209,18 +233,19 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
             }
             else{WriteResults "Yellow" "Windows Updates enabled" "" ""}
         }
-        #EndRegion Manual Updates Check
+        #endregion Check to see if Updates are Set to Manual
 
-        #Check for recently installed updates
+        #region Check for recently installed updates
         $Hotfixes = Get-WmiObject win32_quickfixengineering -ComputerName $_ ; $LastUpdate = $Hotfixes.item(($Hotfixes.length - 1)).InstalledOn
         $Today = Get-Date ; $DateDif = $Today - $LastUpdate
         if ($DateDif.Days -lt 60){
             WriteResults "Green" "Windows Updates have been installed in the last 60 days" "" ""
         }
         else{WriteResults "Red" "NO Windows Updates have been installed in the last 60 days" "" ""}
+        #endregion Check for recently installed updates
 
         #Check NIC Priority
-        #Region Check NIC Priority
+        #region Check NIC Priority
         if($TwoNICs -eq $true){
             #2016 NIC Metric Check
             if ($OS -like "*2016*"){
@@ -256,7 +281,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
                 }
             }
         }
-        #EndRegion Check NIC Priority
+        #endregion Check NIC Priority
 
         Add-Content "$ResultsPath\$HTMLFile" $HTMLOuputEnd
     }
