@@ -13,34 +13,23 @@ $global:CredsWin = New-Object System.Management.Automation.PSCredential ($UserCr
 
 #$CredsSql
 
-function GetComponents()
-{
-    $url = "https://$_`:7890/icm-dp/rest/DiagnosticPortal/ListAppServers"
-    Write-Host "Getting Component List From: $url"
-    $resultXml = Get-XmlFromUrl -url $url
-    return @($resultXml.ListAppServersReply.AppServerList.AppServer | where {$_.ProductComponentType -ne "Cisco ICM Diagnostic Framework"} | select -expand ProductComponentType)
-}
 
 Get-Content c:\Scripts\Servers.txt | ForEach-Object {
+    #Region Setup Vars
     $ResultsPath = "C:\Temp\AuditResults"
     $HTMLFile = "$_.htm"
     $CsvFile = "$_.csv"
-
-    #TempVars
-    $TwoNICs = $true
 
     $HTMLOuputStart = "<html><body><br><b>UCCE/PCCE Server Audit Report.</b></body><html>
     <html><body>"
     $HTMLOuputEnd = "</body></html>"
     Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
     Set-Content -Path "$ResultsPath\$CsvFile" ""
+    #EndRegion Setup Vars
 
-    function GetComponents(){
-        $url = "https://$($server):7890/icm-dp/rest/DiagnosticPortal/ListAppServers"
-        Write-Host "Getting Component List From: $($url)"
-        $resultXml = Get-XmlFromUrl -url $url
-        return @($resultXml.ListAppServersReply.AppServerList.AppServer | where {$_.ProductComponentType -ne "Cisco ICM Diagnostic Framework"} | select -expand ProductComponentType)
-    }
+    #Region TempVars
+    $TwoNICs = $true
+    #EndRegion TempVars
 
     #Write results to CSV, html file and PowerShell window
     #To use function, send it the Color of the message and up to 3 strings to write to audit results
@@ -56,7 +45,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
 
     #Write Page file notice for malconfigured page files
     Function WritePFNotice($Color){
-        WriteResults $Color "It is recommended to configure the Swap File with an Inital and Max size of 1.5 x Memory" "" ""
+        WriteResults $Color " - It is recommended to configure the Swap File with an Inital and Max size of 1.5 x Memory" "" ""
         WriteResults $Color " - Use the below sizes to set the Swap File accordingly " "" ""
         WriteResults $Color " -  - 16GB RAM = 24576MB Page File | 12GB RAM = 18432MB Page File | 8GB RAM =  12288MB Page File" "" ""
         WriteResults $Color " -  -  6GB RAM =  9216MB Page File |  4GB RAM =  6144MB Page File | 2GB RAM =  3072MB Page File" "" ""
@@ -80,10 +69,11 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
     if (Test-Connection -Count 1 -Quiet $_){
         
         #Get OS version
-        $OS = Get-WmiObject -Class win32_operatingsystem -ComputerName $_ | select @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | select -expand OS
+        $OS = Get-WmiObject -Class win32_operatingsystem -ComputerName $_ | Select-Object @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | Select-Object -expand OS
         WriteResults "Default" "OS -" $OS ""
         
         #Get Installed ICM Components
+        #Region Get Installed ICM Components
         MakeWebRequest "https://$_`:7890/icm-dp/rest/DiagnosticPortal/ListAppServers"
         try {$Resp = $WebReq.GetResponse()}
         catch {$Resp = "error"}
@@ -96,7 +86,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         else {
             $Reader = new-object System.IO.StreamReader($resp.GetResponseStream())
             [xml]$ResultXml = $Reader.ReadToEnd()
-            $Services = @($ResultXml.ListAppServersReply.AppServerList.AppServer | where {$_.ProductComponentType -ne "Cisco ICM Diagnostic Framework"} | select -expand ProductComponentType)
+            $Services = @($ResultXml.ListAppServersReply.AppServerList.AppServer | Where-Object {$_.ProductComponentType -ne "Cisco ICM Diagnostic Framework"} | Where-Object {$_.ProductComponentType -ne "Administration Client"} | Select-Object -expand ProductComponentType)
             foreach ($Service in $Services){
                 WriteResults "Green" $Service " Found" ""
 
@@ -108,6 +98,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
             $reader.Close()
             $resp.Close()
         }
+        #EndRegion Get Installed ICM Components
 
         #Check for ICM Components
         <#$components = @{}
@@ -115,6 +106,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         WriteResults "Green" $components "" "" #>
 
         #Get Advanced NIC Properties
+        #Region Get Advanced NIC Properties
         Invoke-Command -ComputerName $_ {Get-NetAdapterAdvancedProperty} | ForEach-Object {
             if ((($_.DisplayName -like "*Off*") -and ($_.DisplayValue -like "*Disabled*")) -or (
                     ($_.DisplayName -like "Speed*") -and ($_.DisplayValue -like "*1.0 Gbps Full*"))){
@@ -125,9 +117,10 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
                 WriteResults "Red" $_.Name $_.DisplayName $_.DisplayValue
             }
         }
+        #EndRegion Get Advanced NIC Properties
     
         #Get Cisco ICM Services and Startup Type
-        Get-Service -ComputerName $_ | select -property DisplayName,StartType | ForEach-Object {
+        Get-Service -ComputerName $_ | Select-Object -property DisplayName,StartType | ForEach-Object {
             if (($_.DisplayName -like "Cisco*")-and($_.StartType -eq "Automatic")){
                 WriteResults "Green" $_.DisplayName " - " $_.StartType
             }
@@ -137,7 +130,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         }
     
         #Check if RDP is enabled
-        if ((Get-WmiObject -name "root\cimv2\TerminalServices" Win32_TerminalServiceSetting -Authentication 6 -ComputerName $_ | select -expand AllowTSConnections) -eq 1){
+        if ((Get-WmiObject -name "root\cimv2\TerminalServices" Win32_TerminalServiceSetting -Authentication 6 -ComputerName $_ | Select-Object -expand AllowTSConnections) -eq 1){
             WriteResults "Green" "Remote Desktop Enabled" "" ""
         }
         else {WriteResults "Red" "Remote Desktop DISABLED" "" ""}
@@ -151,20 +144,21 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         }#>
     
         #Check if CD Rom drive is assigned to Z:
-        if ((Get-WmiObject win32_logicaldisk -ComputerName $_ | where {$_.DriveType -eq 5} |select -expand DeviceID) -eq "z:"){
+        if ((Get-WmiObject win32_logicaldisk -ComputerName $_ | Where-Object {$_.DriveType -eq 5} |Select-Object -expand DeviceID) -eq "z:"){
             WriteResults "Green" "CD Drive Assigned to Z:" "" ""
         }
         else {WriteResults "Red" "CD Drive Assigned to $_" "- Should be reassigned to Z:" ""}
 
         #Check if WMI SNMP Provider is installed
-        if ((Get-WmiObject win32_optionalfeature -ComputerName $_ | where {$_.Name -eq 'WMISnmpProvider'} | select -expand InstallState) -eq "1"){
+        if ((Get-WmiObject win32_optionalfeature -ComputerName $_ | Where-Object {$_.Name -eq 'WMISnmpProvider'} | Select-Object -expand InstallState) -eq "1"){
             WriteResults "Green" "WMI SNMP Provider Installed" "" ""
         }
         else {WriteResults "Red" "WMI SNMP Provider NOT Installed" "- Should be installed" ""}
 
         #Check Page file is hard set to 1.5x RAM size
-        $MemSzMB = [Math]::Ceiling((gwmi win32_computersystem -ComputerName $_  | select -ExpandProperty TotalPhysicalMemory) / 1048576 )
-        if ((Get-WmiObject win32_computersystem -ComputerName $_ | select -expand AutomaticManagedPagefile) -eq "True"){
+        #Region Page File Check
+        $MemSzMB = [Math]::Ceiling((Get-WmiObject win32_computersystem -ComputerName $_  | Select-Object -ExpandProperty TotalPhysicalMemory) / 1048576 )
+        if ((Get-WmiObject win32_computersystem -ComputerName $_ | Select-Object -expand AutomaticManagedPagefile) -eq "True"){
             WriteResults "Red" "Page File Configred to be managed by system" "" ""
             WritePFNotice "Red"
         }
@@ -194,8 +188,10 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
                 WritePFNotice "Yellow"
             }
         }
+        #EndRegion Page File Check
 
         #Check to see if Updates are Set to Manual
+        #Region Manual Updates Check
         $reg=[Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine', $_)
         if ($OS -like "*2016*"){
 	        $regKey=$reg.OpenSubKey("SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU")
@@ -213,9 +209,10 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
             }
             else{WriteResults "Yellow" "Windows Updates enabled" "" ""}
         }
+        #EndRegion Manual Updates Check
 
         #Check for recently installed updates
-        $Hotfixes = gwmi win32_quickfixengineering -ComputerName $_ ; $LastUpdate = $Hotfixes.item(($Hotfixes.length - 1)).InstalledOn
+        $Hotfixes = Get-WmiObject win32_quickfixengineering -ComputerName $_ ; $LastUpdate = $Hotfixes.item(($Hotfixes.length - 1)).InstalledOn
         $Today = Get-Date ; $DateDif = $Today - $LastUpdate
         if ($DateDif.Days -lt 60){
             WriteResults "Green" "Windows Updates have been installed in the last 60 days" "" ""
@@ -223,11 +220,12 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         else{WriteResults "Red" "NO Windows Updates have been installed in the last 60 days" "" ""}
 
         #Check NIC Priority
+        #Region Check NIC Priority
         if($TwoNICs -eq $true){
             #2016 NIC Metric Check
             if ($OS -like "*2016*"){
-                $pubMetric = Invoke-Command -ComputerName $_ {get-netipinterface -interfacealias public | select -expand interfacemetric}
-                $priMetric = Invoke-Command -ComputerName $_ {get-netipinterface -interfacealias private | select -expand interfacemetric}
+                $pubMetric = Invoke-Command -ComputerName $_ {get-netipinterface -interfacealias public | Select-Object -expand interfacemetric}
+                $priMetric = Invoke-Command -ComputerName $_ {get-netipinterface -interfacealias private | Select-Object -expand interfacemetric}
                 if ($pubMetric -lt $priMetric){
                     WriteResults "Green" "NIC Metric Priority correctly configured Public - NIC = $pubMetric and Private NIC = $priMetric" "" ""
                 }
@@ -240,27 +238,25 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
             #2012 R2 Binding Order Check
             else{
                 $Binding = Invoke-Command -ComputerName $_ {(Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Linkage").Bind}
-                $Return = New-Object PSobject
                 $BindingOrder = @()
                 ForEach ($Bind in $Binding)
                 {
                     $DeviceId = $Bind.Split("\")[2]
-                    $Adapter = (Get-WmiObject Win32_Networkadapter -ComputerName $_ | Where {$_.GUID -eq $DeviceId }).NetConnectionId
+                    $Adapter = (Get-WmiObject Win32_Networkadapter -ComputerName $_ | Where-Object {$_.GUID -eq $DeviceId }).NetConnectionId
                     if (($Adapter -like '*public*')-or($Adapter -like '*private*')){
                         $BindingOrder += $Adapter
                     }
                 }
                 if (($BindingOrder[0] -like '*public*')-and($BindingOrder[1] -like '*private*')){
-                    $ResultString =  "Binding Order correctly configured - " + $BindingOrder[0] + " above " + $BindingOrder[1]
-                    WriteResults "Green" $ResultString "" ""
+                    WriteResults "Green" "Binding Order correctly configured - $($BindingOrder[0]) above $($BindingOrder[1])" "" ""
                 }
                 else {
-                    $ResultString =  "Binding Order NOT correctly configured - " + $BindingOrder[1] + " above " + $BindingOrder[0]
-                    WriteResults "Red" $ResultString "" ""
+                    WriteResults "Red" "Binding Order NOT correctly configured - $($BindingOrder[1]) above $($BindingOrder[0])" "" ""
                     WriteResults "Red" " - the Public NIC should be listed above the Private NIC in the Binding Order" "" ""
                 }
             }
         }
+        #EndRegion Check NIC Priority
 
         Add-Content "$ResultsPath\$HTMLFile" $HTMLOuputEnd
     }
