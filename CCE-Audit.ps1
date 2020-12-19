@@ -67,46 +67,41 @@ Get-Content c:\Temp\Servers.txt | ForEach-Object {
         $global:WebReq.Credentials = $CredsWin.GetNetworkCredential()
     }
     #endregion Make Web Request
-
-    #region Invoke Command with Windows Creds
-    Function InvokeCmdWin {
-        Write-Host $ServerName $CredsWin
-        Invoke-Command -ComputerName $ServerName -Credential $CredsWin
-    }
-    #endregion Invoke Command with Windows Creds
-
     #endregion Functions
 
     #Write Server name to results
     WriteResults "Default" "Server -" $_ ""
 
     #Check that the server is reachable
+    WriteResults "Default" "Checking to see if $_ is online" "" ""
     if (Test-Connection -Count 1 -Quiet $_){
+
         
         #Get OS version
+        WriteResults "Default" "Getting OS version" "" ""
         $OS =  Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -Class win32_operatingsystem} | Select-Object @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | Select-Object -expand OS
-        WriteResults "Default" "OS -" $OS ""
+        WriteResults "Default" "- OS -" $OS ""
         
         #region Check that Portico is installed and running
+        WriteResults "Default" "Checking if Portico/ICM is installed and Running" "" ""
         $PorticoService = Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -Class Win32_Service} | Select-Object -property DisplayName,State | Where-Object {$_.DisplayName -eq "Cisco ICM Diagnostic Framework"} | Select-Object -expand State
         if ($PorticoService -ne $null){
             $global:IcmInstalled = $true
-            WriteResults "Green" "Portico/ICM is installed - Checking if it Running" "" ""
+            WriteResults "Green" "- Portico/ICM is installed - Checking if it Running" "" ""
             if ($PorticoService -eq "Running"){
                 $global:PorticoRunning = $true
-                WriteResults "Green" " - Portico/ICM is installed and Running" "" ""
+                WriteResults "Green" "- - Portico/ICM is installed and Running" "" ""
             }
             else{
                 $PorticoRunning = $false
-                WriteResults "Red" "Portico/ICM is installed - But NOT Running" "" ""
+                WriteResults "Red" "- - Portico/ICM is installed - But NOT Running" "" ""
             }
         }
         else{
-            WriteResults "Red" "Unable to find Portico Service Ensure that servername in list is correct" "" ""
-            WriteResults "Red" " - ICM must be installed on the server to be audited, only a limited audit will be run" "" ""
+            WriteResults "Red" "- Unable to find Portico Service Ensure that servername in list is correct" "" ""
+            WriteResults "Red" "- - ICM must be installed on the server to be audited, only a limited audit will be run" "" ""
             $IcmInstalled = $false
         }
-        Write-Host "Portico installed and running " + $IcmInstalled $PorticoRunning
         #endregion Check that Portico is installed and running
 
         #region Get Installed ICM Components
