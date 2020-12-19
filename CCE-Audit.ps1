@@ -13,15 +13,16 @@ $global:CredsWin = New-Object System.Management.Automation.PSCredential ($UserCr
 
 #$CredsSql
 
-Get-Content c:\Scripts\Servers.txt | ForEach-Object {
+Get-Content c:\Temp\Servers.txt | ForEach-Object {
     #region Setup Vars
     $ResultsPath = "C:\Temp\AuditResults"
     $HTMLFile = "$_.htm"
     $CsvFile = "$_.csv"
+    $global:ServerName = $_
 
     $HTMLOuputStart = "<html><body><br><b>UCCE/PCCE Server Audit Report.</b></body><html>
     <html><body>"
-    $HTMLOuputEnd = "</body></html>"
+    $global:HTMLOuputEnd = "</body></html>"
     $IcmInstalled = $false
     $PorticoRunning = $false
     Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
@@ -29,7 +30,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
     #endregion Setup Vars
 
     #region TempVars
-    $TwoNICs = $true
+    $global:TwoNICs = $true
     #endregion TempVars
 
     #region Functions
@@ -66,6 +67,14 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         $global:WebReq.Credentials = $CredsWin.GetNetworkCredential()
     }
     #endregion Make Web Request
+
+    #region Invoke Command with Windows Creds
+    Function InvokeCmdWin {
+        Write-Host $ServerName $CredsWin
+        Invoke-Command -ComputerName $ServerName -Credential $CredsWin
+    }
+    #endregion Invoke Command with Windows Creds
+
     #endregion Functions
 
     #Write Server name to results
@@ -75,30 +84,29 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
     if (Test-Connection -Count 1 -Quiet $_){
         
         #Get OS version
-        $OS = Get-WmiObject -Class win32_operatingsystem -ComputerName $_ | Select-Object @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | Select-Object -expand OS
+        $OS =  Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -Class win32_operatingsystem} | Select-Object @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | Select-Object -expand OS
         WriteResults "Default" "OS -" $OS ""
         
         #region Check that Portico is installed and running
-        Get-Service -ComputerName $_ | Select-Object -property DisplayName,Status | ForEach-Object {
-            if ($_.DisplayName -like "Cisco ICM Diagnostic Framework"){
-                $global:IcmInstalled = $true
-                WriteResults "Green" "Portico is installed - Checking if it Running" "" ""
-                if (($_.DisplayName -like "Cisco ICM Diagnostic Framework")-and($_.Status -eq "Running")){
-                    $global:PorticoRunning = $true
-                    WriteResults "Green" " - Portico is installed and Running" "" ""
-                }
-                else{
-                    $PorticoRunning = $false
-                    WriteResults "Red" "Portico is installed - But NOT Running" "" ""
-                }
+        $PorticoService = Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -Class Win32_Service} | Select-Object -property DisplayName,State | Where-Object {$_.DisplayName -eq "Cisco ICM Diagnostic Framework"} | Select-Object -expand State
+        if ($PorticoService -ne $null){
+            $global:IcmInstalled = $true
+            WriteResults "Green" "Portico/ICM is installed - Checking if it Running" "" ""
+            if ($PorticoService -eq "Running"){
+                $global:PorticoRunning = $true
+                WriteResults "Green" " - Portico/ICM is installed and Running" "" ""
             }
             else{
-                WriteResults "Red" "Unable to find Portico Service Ensure that servername in list is correct" "" ""
-                WriteResults "Red" " - ICM must be installed on the server to be audited, only a limited audit will be run" "" ""
-                $IcmInstalled = $false
+                $PorticoRunning = $false
+                WriteResults "Red" "Portico/ICM is installed - But NOT Running" "" ""
             }
         }
-        Write-Host $IcmInstalled $PorticoRunning
+        else{
+            WriteResults "Red" "Unable to find Portico Service Ensure that servername in list is correct" "" ""
+            WriteResults "Red" " - ICM must be installed on the server to be audited, only a limited audit will be run" "" ""
+            $IcmInstalled = $false
+        }
+        Write-Host "Portico installed and running " + $IcmInstalled $PorticoRunning
         #endregion Check that Portico is installed and running
 
         #region Get Installed ICM Components
@@ -115,7 +123,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
             $Reader = new-object System.IO.StreamReader($resp.GetResponseStream())
             [xml]$ResultXml = $Reader.ReadToEnd()
             $Services = @($ResultXml.ListAppServersReply.AppServerList.AppServer | Where-Object {$_.ProductComponentType -ne "Cisco ICM Diagnostic Framework"} | Where-Object {$_.ProductComponentType -ne "Administration Client"} | Select-Object -expand ProductComponentType)
-            foreach ($Service in $Services){
+            ForEach ($Service in $Services){
                 WriteResults "Green" $Service " Found" ""
 
             }
@@ -129,7 +137,7 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         #endregion Get Installed ICM Components
 
         #region Get Advanced NIC Properties
-        Invoke-Command -ComputerName $_ {Get-NetAdapterAdvancedProperty} | ForEach-Object {
+        Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-NetAdapterAdvancedProperty} | ForEach-Object {
             if ((($_.DisplayName -like "*Off*") -and ($_.DisplayValue -like "*Disabled*")) -or (
                     ($_.DisplayName -like "Speed*") -and ($_.DisplayValue -like "*1.0 Gbps Full*"))){
                 WriteResults "Green" $_.Name $_.DisplayName $_.DisplayValue
@@ -142,18 +150,19 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         #endregion Get Advanced NIC Properties
     
         #region Get Cisco ICM Services and Startup Type
-        Get-Service -ComputerName $_ | Select-Object -property DisplayName,StartType | ForEach-Object {
-            if (($_.DisplayName -like "Cisco*")-and($_.StartType -eq "Automatic")){
-                WriteResults "Green" $_.DisplayName " - " $_.StartType
+        #$IcmServices =
+         Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -Class Win32_Service | Select-Object -property DisplayName,StartMode} | ForEach-Object {
+            if (($_.DisplayName -like "Cisco*")-and($_.StartMode -like "Auto*")){
+                WriteResults "Green" $_.DisplayName " - " $_.StartMode
             }
-            elseif (($_.DisplayName -like "Cisco*")-and($_.StartType -ne "Automatic")) {
-                WriteResults "Red" $_.DisplayName " - " $_.StartType
+            elseif (($_.DisplayName -like "Cisco*")-and($_.StartMode -notlike "Auto*")) {
+                WriteResults "Red" $_.DisplayName " - " $_.StartMode
             }
         }
         #endregion Get Cisco ICM Services and Startup Type
     
         #region Check if RDP is enabled
-        if ((Get-WmiObject -name "root\cimv2\TerminalServices" Win32_TerminalServiceSetting -Authentication 6 -ComputerName $_ | Select-Object -expand AllowTSConnections) -eq 1){
+        if ((Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -name "root\cimv2\TerminalServices" Win32_TerminalServiceSetting} | Select-Object -expand AllowTSConnections)-eq 1){
             WriteResults "Green" "Remote Desktop Enabled" "" ""
         }
         else {WriteResults "Red" "Remote Desktop DISABLED" "" ""}
@@ -170,25 +179,25 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         #endregion
     
         #Check if CD Rom drive is assigned to Z:
-        if ((Get-WmiObject win32_logicaldisk -ComputerName $_ | Where-Object {$_.DriveType -eq 5} |Select-Object -expand DeviceID) -eq "z:"){
+        if((Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject win32_logicaldisk} | Where-Object {$_.DriveType -eq 5} |Select-Object -expand DeviceID)-eq"z:"){
             WriteResults "Green" "CD Drive Assigned to Z:" "" ""
         }
         else {WriteResults "Red" "CD Drive Assigned to $_" "- Should be reassigned to Z:" ""}
 
         #Check if WMI SNMP Provider is installed
-        if ((Get-WmiObject win32_optionalfeature -ComputerName $_ | Where-Object {$_.Name -eq 'WMISnmpProvider'} | Select-Object -expand InstallState) -eq "1"){
+        if ((Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject win32_optionalfeature} | Where-Object {$_.Name -eq 'WMISnmpProvider'} | Select-Object -expand InstallState) -eq "1"){
             WriteResults "Green" "WMI SNMP Provider Installed" "" ""
         }
         else {WriteResults "Red" "WMI SNMP Provider NOT Installed" "- Should be installed" ""}
 
         #region Check Page file is hard set to 1.5x RAM size
-        $MemSzMB = [Math]::Ceiling((Get-WmiObject win32_computersystem -ComputerName $_  | Select-Object -ExpandProperty TotalPhysicalMemory) / 1048576 )
-        if ((Get-WmiObject win32_computersystem -ComputerName $_ | Select-Object -expand AutomaticManagedPagefile) -eq "True"){
+        $MemSzMB = Invoke-Command -ComputerName $_ -Credential $CredsWin {[Math]::Ceiling((Get-WmiObject win32_computersystem | Select-Object -ExpandProperty TotalPhysicalMemory) / 1048576 )}
+        if ((Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject win32_computersystem} | Select-Object -expand AutomaticManagedPagefile) -eq "True"){
             WriteResults "Red" "Page File Configred to be managed by system" "" ""
             WritePFNotice "Red"
         }
         else{
-            $PfSettings = Get-CimInstance -Class Win32_PageFileSetting -ComputerName $_
+            $PfSettings = Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -Class Win32_PageFileSetting}
             $PfRangeLow = $MemSzMB*1.4 ; $PfRangeHigh = $MemSzMB*1.6
             #Write-Host $PfSettings.InitialSize $PfSettings.MaximumSize
             if ($PfSettings.InitialSize -eq $PfSettings.MaximumSize){
@@ -216,19 +225,22 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         #endregion Check Page file is hard set to 1.5x RAM size
 
         #region Check to see if Updates are Set to Manual
-        $reg=[Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine', $_)
+        #$reg = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {(Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU").NoAutoUpdate}
+        #$reg=[Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('LocalMachine', $_)
         if ($OS -like "*2016*"){
-	        $regKey=$reg.OpenSubKey("SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU")
-            $UpdateStatus = $regKey.GetValue('NoAutoUpdate')
+            $reg = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {(Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU").NoAutoUpdate}
+	        #$regKey=$reg.OpenSubKey("SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU")
+            #$UpdateStatus = $regKey.GetValue('NoAutoUpdate')
             if ($UpdateStatus -eq 1){
                 WriteResults "Green" "Windows Updates Set to manual" "" ""
             }
             else{WriteResults "Yellow" "Windows Updates enabled" "" ""}
         }
         elseif($OS -like "*2012*"){
-            $regKey=$reg.OpenSubKey("SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update")
-            $UpdateStatus = $regKey.GetValue('AUOptions')
-            if ($UpdateStatus -eq 1){
+            $reg = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {(Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update").AUOptions}
+            #$regKey=$reg.OpenSubKey("SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update")
+            #$UpdateStatus = $regKey.GetValue('AUOptions')
+            if ($reg -eq 1){
                 WriteResults "Green" "Windows Updates Set to manual" "" ""
             }
             else{WriteResults "Yellow" "Windows Updates enabled" "" ""}
@@ -236,7 +248,8 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         #endregion Check to see if Updates are Set to Manual
 
         #region Check for recently installed updates
-        $Hotfixes = Get-WmiObject win32_quickfixengineering -ComputerName $_ ; $LastUpdate = $Hotfixes.item(($Hotfixes.length - 1)).InstalledOn
+        $Hotfixes = Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject win32_quickfixengineering}
+        $LastUpdate = $Hotfixes.item(($Hotfixes.length - 1)).InstalledOn
         $Today = Get-Date ; $DateDif = $Today - $LastUpdate
         if ($DateDif.Days -lt 60){
             WriteResults "Green" "Windows Updates have been installed in the last 60 days" "" ""
@@ -249,8 +262,8 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
         if($TwoNICs -eq $true){
             #2016 NIC Metric Check
             if ($OS -like "*2016*"){
-                $pubMetric = Invoke-Command -ComputerName $_ {get-netipinterface -interfacealias public | Select-Object -expand interfacemetric}
-                $priMetric = Invoke-Command -ComputerName $_ {get-netipinterface -interfacealias private | Select-Object -expand interfacemetric}
+                $pubMetric = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {get-netipinterface -interfacealias public | Select-Object -expand interfacemetric}
+                $priMetric = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {get-netipinterface -interfacealias private | Select-Object -expand interfacemetric}
                 if ($pubMetric -lt $priMetric){
                     WriteResults "Green" "NIC Metric Priority correctly configured Public - NIC = $pubMetric and Private NIC = $priMetric" "" ""
                 }
@@ -262,12 +275,12 @@ Get-Content c:\Scripts\Servers.txt | ForEach-Object {
 
             #2012 R2 Binding Order Check
             else{
-                $Binding = Invoke-Command -ComputerName $_ {(Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Linkage").Bind}
+                $Binding = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Linkage"} | Select-Object -expand Bind
                 $BindingOrder = @()
                 ForEach ($Bind in $Binding)
                 {
                     $DeviceId = $Bind.Split("\")[2]
-                    $Adapter = (Get-WmiObject Win32_Networkadapter -ComputerName $_ | Where-Object {$_.GUID -eq $DeviceId }).NetConnectionId
+                    $Adapter = Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject Win32_Networkadapter} | Where-Object {$_.GUID -like "$DeviceId" } | Select-Object -expand NetConnectionId
                     if (($Adapter -like '*public*')-or($Adapter -like '*private*')){
                         $BindingOrder += $Adapter
                     }
