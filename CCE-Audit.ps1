@@ -5,11 +5,11 @@
 #region Initial Setup Vars
 $InputServerList = "C:\Temp\Servers.txt"
 $TempFolder = "C:\Temp"
-$ResultsPath = "C:\Temp\AuditResults"
+$global:ResultsPath = "C:\Temp\AuditResults"
 $CredsCsv = "C:\Temp\Creds.csv"
 $HTMLFile = "Initial.htm"
 $CsvFile = "Initial.csv"
-$HTMLOuputStart = "<html><body><br><b>UCCE/PCCE Server Audit Report.</b></body><html>
+$global:HTMLOuputStart = "<html><body><br><b>UCCE/PCCE Server Audit Report.</b></body><html>
 <html><body>"
 $global:HTMLOuputEnd = "</body></html>"
 #endregion Initial Setup Vars
@@ -119,12 +119,8 @@ else{
 
 Get-Content $InputServerList | ForEach-Object {
     #region Setup Vars
-    $ResultsPath = "C:\Temp\AuditResults"
     $HTMLFile = "$_.htm"
     $CsvFile = "$_.csv"
-    $HTMLOuputStart = "<html><body><br><b>UCCE/PCCE Server Audit Report.</b></body><html>
-    <html><body>"
-    $global:HTMLOuputEnd = "</body></html>"
     $IcmInstalled = $false
     $PorticoRunning = $false
     Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
