@@ -66,12 +66,13 @@ Function CloseHtml {
 }
 #endregion Functions
 
-#
+#Check to see if the Server list is present
+WriteResults "Default" "Checking to see if the Server list is present" "" ""
 if (Test-Path -Path $InputServerList){
-    WriteResults "Green" "Server list file found, proceeding"
+    WriteResults "Green" "- Server list file found, proceeding" "" "Pass"
 }
 else{
-    WriteResults "Red" "File NOT Found, exiting"
+    WriteResults "Red" "File NOT Found, exiting" "" ""
     CloseHtml
     Exit
 }
@@ -100,7 +101,7 @@ Get-Content $InputServerList | ForEach-Object {
     #Check that the server is reachable
     WriteResults "Default" "Checking to see if $_ is online" "" ""
     if (Test-Connection -Count 1 -Quiet $_){
-        WriteResults "Green" "Server $_ Online - Continuing with healthchek items" "" ""
+        WriteResults "Green" "Server $_ Online - Continuing with health chek items" "" "Pass"
         
         #Get OS version
         WriteResults "Default" "Getting OS version" "" ""
@@ -112,19 +113,19 @@ Get-Content $InputServerList | ForEach-Object {
         $PorticoService = Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -Class Win32_Service} | Select-Object -property DisplayName,State | Where-Object {$_.DisplayName -eq "Cisco ICM Diagnostic Framework"} | Select-Object -expand State
         if ($PorticoService -ne $null){
             $global:IcmInstalled = $true
-            WriteResults "Green" "- Portico/ICM is installed - Checking if it is Running" "" ""
+            WriteResults "Green" "- Portico/ICM is installed - Checking if it is Running" "" "Pass"
             if ($PorticoService -eq "Running"){
                 $global:PorticoRunning = $true
-                WriteResults "Green" "- - Portico/ICM is installed and Running" "" ""
+                WriteResults "Green" "- - Portico/ICM is installed and Running" "" "Pass"
             }
             else{
                 $PorticoRunning = $false
-                WriteResults "Red" "- - Portico/ICM is installed - But NOT Running" "" ""
+                WriteResults "Red" "- - Portico/ICM is installed - But NOT Running" "" "Fail"
             }
         }
         else{
-            WriteResults "Red" "- Unable to find Portico Service Ensure that servername in list is correct" "" ""
-            WriteResults "Red" "- - ICM must be installed on the server to be audited, only a limited audit will be run" "" ""
+            WriteResults "Red" "- Unable to find Portico Service Ensure that servername in list is correct" "" "Fail"
+            WriteResults "Red" "- - ICM must be installed on the server to be audited, only a limited audit will be run" "" "Fail"
             $IcmInstalled = $false
         }
         #endregion Check that Portico is installed and running
@@ -146,12 +147,7 @@ Get-Content $InputServerList | ForEach-Object {
             $Services = @($ResultXml.ListAppServersReply.AppServerList.AppServer | Where-Object {$_.ProductComponentType -ne "Cisco ICM Diagnostic Framework"} | Where-Object {$_.ProductComponentType -ne "Administration Client"} | Select-Object -expand ProductComponentType)
             ForEach ($Service in $Services){
                 WriteResults "Green" "- "$Service " Found"
-
             }
-            <#
-            if ($services -like "*CTI Server*"){
-                Write-Host "Found CTI Server"
-            }#>
             $reader.Close()
             $resp.Close()
         }
@@ -162,23 +158,23 @@ Get-Content $InputServerList | ForEach-Object {
         Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-NetAdapterAdvancedProperty} | ForEach-Object {
             if ((($_.DisplayName -like "*Off*") -and ($_.DisplayValue -like "*Disabled*")) -or (
                     ($_.DisplayName -like "Speed*") -and ($_.DisplayValue -like "*1.0 Gbps Full*"))){
-                WriteResults "Green" "- $($_.Name)" $_.DisplayName $_.DisplayValue
+                WriteResults "Green" "- $($_.Name) $($_.DisplayName)  $($_.DisplayValue)" "" "Pass"
             }
             elseif ((($_.DisplayName -like "*Off*") -and ($_.DisplayValue -notlike "*Disabled*"))-or(
                         ($_.DisplayName -like "Speed*") -and ($_.DisplayValue -notlike "*1.0 Gbps Full*"))){
-                WriteResults "Red" "- $($_.Name)" $_.DisplayName $_.DisplayValue
+                WriteResults "Red" "- $($_.Name) $($_.DisplayName) $($_.DisplayValue)" "" "Fail"
             }
         }
         #endregion Get Advanced NIC Properties
     
         #region Get Cisco ICM Services and Startup Type
         WriteResults "Default" "Checking to see what ICM services are installed and their Startup Type" "" ""
-         Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -Class Win32_Service | Select-Object -property DisplayName,StartMode} | ForEach-Object {
-            if (($_.DisplayName -like "Cisco*")-and($_.StartMode -like "Auto*")){
-                WriteResults "Green" "- $($_.DisplayName)" " - " $_.StartMode
+         Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -Class Win32_Service} | Select-Object -property DisplayName,StartMode,State | ForEach-Object {
+            if (($_.DisplayName -like "Cisco*")-and($_.StartMode -like "Auto*")-and($_.State -like "Running")){
+                WriteResults "Green" "- $($_.DisplayName) - $($_.State) - $($_.StartMode)" "" "Pass"
             }
-            elseif (($_.DisplayName -like "Cisco*")-and($_.StartMode -notlike "Auto*")) {
-                WriteResults "Red" "- $($_.DisplayName)" " - " $_.StartMode
+            elseif (($_.DisplayName -like "Cisco*")-and(($_.StartMode -notlike "Auto*")-or($_.State -notlike "Running"))) {
+                WriteResults "Red" "- $($_.DisplayName) - $($_.State) - $($_.StartMode)" "" "Fail"
             }
         }
         #endregion Get Cisco ICM Services and Startup Type
@@ -186,9 +182,9 @@ Get-Content $InputServerList | ForEach-Object {
         #region Check if RDP is enabled
         WriteResults "Default" "Checking to see RDP Services are enabled" "" ""
         if ((Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -name "root\cimv2\TerminalServices" Win32_TerminalServiceSetting} | Select-Object -expand AllowTSConnections)-eq 1){
-            WriteResults "Green" "- Remote Desktop Enabled" "" ""
+            WriteResults "Green" "- Remote Desktop Enabled" "" "Pass"
         }
-        else {WriteResults "Red" "- Remote Desktop DISABLED" "" ""}
+        else {WriteResults "Red" "- Remote Desktop DISABLED" "" "Fail"}
         #enddregion Check if RDP is enabled
 
 
@@ -203,23 +199,24 @@ Get-Content $InputServerList | ForEach-Object {
     
         #Check if CD Rom drive is assigned to Z:
         WriteResults "Default" "Checking to see if CD Rom has been reassigned to Z:" "" ""
-        if((Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject win32_logicaldisk} | Where-Object {$_.DriveType -eq 5} |Select-Object -expand DeviceID)-eq"z:"){
-            WriteResults "Green" "- CD Drive Assigned to Z:" "" ""
+        $CdRomDrive = Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject win32_logicaldisk} | Where-Object {$_.DriveType -eq 5} |Select-Object -expand DeviceID
+        if($CdRomDrive -eq "z:"){
+            WriteResults "Green" "- CD Drive Assigned to Z:" "" "Pass"
         }
-        else {WriteResults "Red" "- CD Drive Assigned to $_" "- Should be reassigned to Z:" ""}
+        else {WriteResults "Red" "- CD Drive Assigned to $CdRomDrive - Should be reassigned to Z:" "" "Fail"}
 
         #Check if WMI SNMP Provider is installed
         WriteResults "Default" "Checking to see if WMI SNMP Provider is installed" "" ""
         if ((Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject win32_optionalfeature} | Where-Object {$_.Name -eq 'WMISnmpProvider'} | Select-Object -expand InstallState) -eq "1"){
-            WriteResults "Green" "- WMI SNMP Provider Installed" "" ""
+            WriteResults "Green" "- WMI SNMP Provider Installed" "" "Pass"
         }
-        else {WriteResults "Red" "- WMI SNMP Provider NOT Installed" "- Should be installed" ""}
+        else {WriteResults "Red" "- WMI SNMP Provider NOT Installed - Should be installed" "" "Fail"}
 
         #region Check Page file is hard set to 1.5x RAM size
         WriteResults "Default" "Checking to see if Page file is configured to MS best practices" "" ""
         $MemSzMB = Invoke-Command -ComputerName $_ -Credential $CredsWin {[Math]::Ceiling((Get-WmiObject win32_computersystem | Select-Object -ExpandProperty TotalPhysicalMemory) / 1048576 )}
         if ((Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject win32_computersystem} | Select-Object -expand AutomaticManagedPagefile) -eq "True"){
-            WriteResults "Red" "- Page File Configred to be managed by system" "" ""
+            WriteResults "Red" "- Page File Configred to be managed by system" "" "Fail"
             WritePFNotice "Red"
         }
         else{
@@ -228,23 +225,23 @@ Get-Content $InputServerList | ForEach-Object {
             #Write-Host $PfSettings.InitialSize $PfSettings.MaximumSize
             if ($PfSettings.InitialSize -eq $PfSettings.MaximumSize){
                 if (($PfSettings.MaximumSize -gt $PfRangeLow) -and ($PfSettings.MaximumSize -lt $PfRangeHigh)){
-                    WriteResults "Green" "- Page File Configred to best practices" "" ""
+                    WriteResults "Green" "- Page File Configred to best practices" "" "Pass"
                 }
                 elseif($PfSettings.MaximumSize -gt $PfRangeHigh){
-                    WriteResults "Yellow" "- Page File Configred larger than typical installs" "" ""
+                    WriteResults "Yellow" "- Page File Configred larger than typical installs" "" "Warning"
                     WritePFNotice "Yellow"
                 }
                 else{
-                    WriteResults "Red" "- Page File Size Should be increased" "" ""
+                    WriteResults "Red" "- Page File Size Should be increased" "" "Fail"
                     WritePFNotice "Red"
                 }
             }
             elseif($PfSettings.InitialSize -lt $PfRangeLow){
-                WriteResults "Red" "- Page File Size Should be increased and both Initial and Max Values shoufl be the same" "" ""
+                WriteResults "Red" "- Page File Size Should be increased and both Initial and Max Values shoufl be the same" "" "Fail"
                 WritePFNotice "Red"
             }
             else{
-                WriteResults "Yellow" "- Page File Size is large enough but both Initial and Max Values shoufl be the same" "" ""
+                WriteResults "Yellow" "- Page File Size is large enough but both Initial and Max Values shoufl be the same" "" "Warning"
                 WritePFNotice "Yellow"
             }
         }
@@ -257,18 +254,18 @@ Get-Content $InputServerList | ForEach-Object {
 	        #$regKey=$reg.OpenSubKey("SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU")
             #$UpdateStatus = $regKey.GetValue('NoAutoUpdate')
             if ($UpdateStatus -eq 1){
-                WriteResults "Green" "- Windows Updates Set to manual" "" ""
+                WriteResults "Green" "- Windows Updates Set to manual" "" "Pass"
             }
-            else{WriteResults "Yellow" "- Windows Updates enabled" "" ""}
+            else{WriteResults "Yellow" "- Windows Updates enabled" "" "Warning"}
         }
         elseif($OS -like "*2012*"){
             $reg = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {(Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update").AUOptions}
             #$regKey=$reg.OpenSubKey("SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update")
             #$UpdateStatus = $regKey.GetValue('AUOptions')
             if ($reg -eq 1){
-                WriteResults "Green" "- Windows Updates Set to manual" "" ""
+                WriteResults "Green" "- Windows Updates Set to manual" "" "Pass"
             }
-            else{WriteResults "Yellow" "- Windows Updates enabled" "" ""}
+            else{WriteResults "Yellow" "- Windows Updates enabled" "" "Warning"}
         }
         #endregion Check to see if Updates are Set to Manual
 
@@ -278,9 +275,9 @@ Get-Content $InputServerList | ForEach-Object {
         $LastUpdate = $Hotfixes.item(($Hotfixes.length - 1)).InstalledOn
         $Today = Get-Date ; $DateDif = $Today - $LastUpdate
         if ($DateDif.Days -lt 60){
-            WriteResults "Green" "- Windows Updates have been installed in the last 60 days" "" ""
+            WriteResults "Green" "- Windows Updates have been installed in the last 60 days" "" "Pass"
         }
-        else{WriteResults "Red" "- NO Windows Updates have been installed in the last 60 days" "" ""}
+        else{WriteResults "Red" "- NO Windows Updates have been installed in the last 60 days" "" "Fail"}
         #endregion Check for recently installed updates
 
         #region Check NIC Priority
@@ -292,11 +289,11 @@ Get-Content $InputServerList | ForEach-Object {
                 $pubMetric = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {get-netipinterface -interfacealias public | Select-Object -expand interfacemetric}
                 $priMetric = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {get-netipinterface -interfacealias private | Select-Object -expand interfacemetric}
                 if ($pubMetric -lt $priMetric){
-                    WriteResults "Green" "- NIC Metric Priority correctly configured Public - NIC = $pubMetric and Private NIC = $priMetric" "" ""
+                    WriteResults "Green" "- NIC Metric Priority correctly configured Public - NIC = $pubMetric and Private NIC = $priMetric" "" "Pass"
                 }
                 else{
-                   WriteResults "Red" "- NIC Metric Priority NOT correctly configured - Public NIC = $pubMetric and Private NIC = $priMetric" "" ""
-                    WriteResults "Red" "- - Public NIC should have a lower Metric value than the Priate NIC" "" ""
+                   WriteResults "Red" "- NIC Metric Priority NOT correctly configured - Public NIC = $pubMetric and Private NIC = $priMetric" "" "Fail"
+                    WriteResults "Red" "- - Public NIC should have a lower Metric value than the Priate NIC" "" "Fail"
                 }
             }
 
@@ -314,11 +311,11 @@ Get-Content $InputServerList | ForEach-Object {
                     }
                 }
                 if (($BindingOrder[0] -like '*public*')-and($BindingOrder[1] -like '*private*')){
-                    WriteResults "Green" "- Binding Order correctly configured - $($BindingOrder[0]) above $($BindingOrder[1])" "" ""
+                    WriteResults "Green" "- Binding Order correctly configured - $($BindingOrder[0]) above $($BindingOrder[1])" "" "Pass"
                 }
                 else {
-                    WriteResults "Red" "- Binding Order NOT correctly configured - $($BindingOrder[1]) above $($BindingOrder[0])" "" ""
-                    WriteResults "Red" "- - the Public NIC should be listed above the Private NIC in the Binding Order" "" ""
+                    WriteResults "Red" "- Binding Order NOT correctly configured - $($BindingOrder[1]) above $($BindingOrder[0])" "" "Fail"
+                    WriteResults "Red" "- - the Public NIC should be listed above the Private NIC in the Binding Order" "" "Fail"
                 }
             }
         }
@@ -329,7 +326,7 @@ Get-Content $InputServerList | ForEach-Object {
 
     #If Server not Reachable NOT continuing with Audit Checks
     Else{
-        WriteResults "Red" "Server $_ is not reachable - Ensure server is online and attempt to audit again." "" ""
+        WriteResults "Red" "Server $_ is not reachable - Ensure server is online and attempt to audit again." "" "Fail"
         CloseHtml
     }
 }
