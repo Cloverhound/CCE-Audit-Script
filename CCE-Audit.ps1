@@ -6,13 +6,12 @@
 $InputServerList = "C:\Temp\Servers.txt"
 $TempFolder = "C:\Temp"
 $ResultsPath = "C:\Temp\AuditResults"
+$CredsCsv = "C:\Temp\Creds2.csv"
 $HTMLFile = "Initial.htm"
 $CsvFile = "Initial.csv"
 $HTMLOuputStart = "<html><body><br><b>UCCE/PCCE Server Audit Report.</b></body><html>
 <html><body>"
 $global:HTMLOuputEnd = "</body></html>"
-Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
-Set-Content -Path "$ResultsPath\$CsvFile" ""
 #endregion Initial Setup Vars
 
 #region Functions
@@ -50,6 +49,11 @@ Function MakeWebRequest ($Url){
 }
 #endregion Make Web Request
 
+#Get Windows/ICM Admin credentials
+Function GetCredsWin {
+    $global:CredsWin = Get-Credential -Message "Enter Windows/ICM Admin Credentials"
+}
+
 #Write closing tags for HTML file
 Function CloseHtml {
     Add-Content "$ResultsPath\$HTMLFile" $HTMLOuputEnd
@@ -76,30 +80,42 @@ else{
     New-Item $ResultsPath -ItemType "Directory"
 }
 
+Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
+Set-Content -Path "$ResultsPath\$CsvFile" ""
+
 #Check to see if the Server list is present
 WriteResults "Default" "Checking to see if the Server list is present" "" ""
 if (Test-Path -Path $InputServerList){
     WriteResults "Green" "- Server list file found, proceeding" "" "Pass"
 }
 else{
-    WriteResults "Red" "File NOT Found, exiting" "" ""
+    WriteResults "Red" "File NOT Found - Nothing to check, exiting" "" ""
     CloseHtml
     Exit
 }
 
 #Check to see if the Credentials CSV file is present
 WriteResults "Default" "Checking to see if the Credentials CSV File is present" "" ""
-if (Test-Path -Path "C:\Temp\Creds.csv"){
-    #Read Windows and Portico credentials from CSV file
-    WriteResults "Green" "Loading Credentials from CSV, proceeding" "" ""
-    $UserCreds = Import-Csv -Path "C:\Temp\Creds.csv"
-    $password = ConvertTo-SecureString $UserCreds.pass -AsPlainText -Force
-    $global:CredsWin = New-Object System.Management.Automation.PSCredential ($UserCreds.username, $password)
+if (Test-Path -Path $CredsCsv){
+    #check to see if credentials are present in CSV file
+    $UserCreds = Import-Csv -Path $CredsCsv
+    if (($null -ne $UserCreds.username)-and($null -ne $UserCreds.pass)){
+        #Read Windows and Portico credentials from CSV file
+        WriteResults "Green" "Loading Credentials from CSV, proceeding" "" ""
+        $password = ConvertTo-SecureString $UserCreds.pass -AsPlainText -Force
+        $global:CredsWin = New-Object System.Management.Automation.PSCredential ($UserCreds.username, $password)
+    }
+    else{
+        WriteResults "Red" "Credentials not found in CSV, prompting for credentials"
+        GetCredsWin
+    }
 }
 else{
-    WriteResults "Red" "Credentials CSV NOT Found, prompting" "" ""
-    $global:CredsWin = Get-Credential -Message "test"
+    WriteResults "Red" "Credentials CSV file NOT Found, prompting for credentials" "" ""
+    GetCredsWin
 }
+
+
 
 Get-Content $InputServerList | ForEach-Object {
     #region Setup Vars
