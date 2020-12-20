@@ -1,20 +1,10 @@
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-<#
-#Prompt for Windows and Portico Credentials, 
-$CredsWin = Get-Credential -Message "test"
-#>
-
-#Read Windows and Portico credentials from CSV file
-$UserCreds = Import-Csv -Path "C:\Temp\Creds.csv"
-$password = ConvertTo-SecureString $UserCreds.pass -AsPlainText -Force
-$global:CredsWin = New-Object System.Management.Automation.PSCredential ($UserCreds.username, $password)
-#>
-
 #$CredsSql
 
 #region Initial Setup Vars
 $InputServerList = "C:\Temp\Servers.txt"
+$TempFolder = "C:\Temp"
 $ResultsPath = "C:\Temp\AuditResults"
 $HTMLFile = "Initial.htm"
 $CsvFile = "Initial.csv"
@@ -45,7 +35,7 @@ Function WritePFNotice($Color){
     WriteResults $Color "- Use the below sizes to set the Swap File accordingly " "" ""
     WriteResults $Color "-  - 16GB RAM = 24576MB Page File | 12GB RAM = 18432MB Page File | 8GB RAM =  12288MB Page File" "" ""
     WriteResults $Color "-  -  6GB RAM =  9216MB Page File |  4GB RAM =  6144MB Page File | 2GB RAM =  3072MB Page File" "" ""
-    WriteResults $Color "-  -  Note that Page File changes typically require a reboot" "" ""
+    WriteResults $Color "-  -  Note that a change to the Page File may require a reboot" "" ""
 }
 #endregion Write Page file notice for malconfigured page files
 
@@ -66,6 +56,26 @@ Function CloseHtml {
 }
 #endregion Functions
 
+#Check to see if the Temp folder is present in c:
+Write-Host "Checking to see if the Temp folder is present in c:"
+if (Test-Path -Path $TempFolder){
+    Write-Host "Temp folder found, proceeding"
+}
+else{
+    Write-Host "Temp folder NOT Found, creating one"
+    New-Item $TempFolder -ItemType "Directory"
+}
+
+#Check to see if the Audit Results folder is present
+Write-Host "Checking to see if the Audit Results folder is present"
+if (Test-Path -Path $ResultsPath){
+    WriteResults "Green" "- Audit Results folder found, proceeding" "" "Pass"
+}
+else{
+    Write-Host "Audit Results folder NOT Found, creating one"
+    New-Item $ResultsPath -ItemType "Directory"
+}
+
 #Check to see if the Server list is present
 WriteResults "Default" "Checking to see if the Server list is present" "" ""
 if (Test-Path -Path $InputServerList){
@@ -75,6 +85,20 @@ else{
     WriteResults "Red" "File NOT Found, exiting" "" ""
     CloseHtml
     Exit
+}
+
+#Check to see if the Credentials CSV file is present
+WriteResults "Default" "Checking to see if the Credentials CSV File is present" "" ""
+if (Test-Path -Path "C:\Temp\Creds.csv"){
+    #Read Windows and Portico credentials from CSV file
+    WriteResults "Green" "Loading Credentials from CSV, proceeding" "" ""
+    $UserCreds = Import-Csv -Path "C:\Temp\Creds.csv"
+    $password = ConvertTo-SecureString $UserCreds.pass -AsPlainText -Force
+    $global:CredsWin = New-Object System.Management.Automation.PSCredential ($UserCreds.username, $password)
+}
+else{
+    WriteResults "Red" "Credentials CSV NOT Found, prompting" "" ""
+    $global:CredsWin = Get-Credential -Message "test"
 }
 
 Get-Content $InputServerList | ForEach-Object {
@@ -156,12 +180,10 @@ Get-Content $InputServerList | ForEach-Object {
         #region Get Advanced NIC Properties
         WriteResults "Default" "Check to see if TCP Offload and Speed/Duplex setting are configured properly" "" ""
         Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-NetAdapterAdvancedProperty} | ForEach-Object {
-            if ((($_.DisplayName -like "*Off*") -and ($_.DisplayValue -like "*Disabled*")) -or (
-                    ($_.DisplayName -like "Speed*") -and ($_.DisplayValue -like "*1.0 Gbps Full*"))){
+            if ((($_.DisplayName -like "*Off*") -and ($_.DisplayValue -like "*Disabled*")) -or (($_.DisplayName -like "Speed*") -and ($_.DisplayValue -like "*1.0 Gbps Full*"))){
                 WriteResults "Green" "- $($_.Name) $($_.DisplayName)  $($_.DisplayValue)" "" "Pass"
             }
-            elseif ((($_.DisplayName -like "*Off*") -and ($_.DisplayValue -notlike "*Disabled*"))-or(
-                        ($_.DisplayName -like "Speed*") -and ($_.DisplayValue -notlike "*1.0 Gbps Full*"))){
+            elseif ((($_.DisplayName -like "*Off*") -and ($_.DisplayValue -notlike "*Disabled*"))-or(($_.DisplayName -like "Speed*") -and ($_.DisplayValue -notlike "*1.0 Gbps Full*"))){
                 WriteResults "Red" "- $($_.Name) $($_.DisplayName) $($_.DisplayValue)" "" "Fail"
             }
         }
@@ -286,8 +308,8 @@ Get-Content $InputServerList | ForEach-Object {
             #2016 NIC Metric Check
             if ($OS -like "*2016*"){
                 WriteResults "Default" "- Server 2016 Found Checking Interface Metric" "" ""
-                $pubMetric = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {get-netipinterface -interfacealias public | Select-Object -expand interfacemetric}
-                $priMetric = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {get-netipinterface -interfacealias private | Select-Object -expand interfacemetric}
+                $pubMetric = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {get-netipinterface -interfacealias *public* | Select-Object -expand interfacemetric}
+                $priMetric = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {get-netipinterface -interfacealias *private* | Select-Object -expand interfacemetric}
                 if ($pubMetric -lt $priMetric){
                     WriteResults "Green" "- NIC Metric Priority correctly configured Public - NIC = $pubMetric and Private NIC = $priMetric" "" "Pass"
                 }
