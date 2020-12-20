@@ -6,7 +6,7 @@
 $InputServerList = "C:\Temp\Servers.txt"
 $TempFolder = "C:\Temp"
 $ResultsPath = "C:\Temp\AuditResults"
-$CredsCsv = "C:\Temp\Creds2.csv"
+$CredsCsv = "C:\Temp\Creds.csv"
 $HTMLFile = "Initial.htm"
 $CsvFile = "Initial.csv"
 $HTMLOuputStart = "<html><body><br><b>UCCE/PCCE Server Audit Report.</b></body><html>
@@ -16,15 +16,15 @@ $global:HTMLOuputEnd = "</body></html>"
 
 #region Functions
 #region Write results to CSV, html file and PowerShell window
-#To use function, send it the Color of the message and up to 3 strings to write to audit result files and console
-Function WriteResults ($Color,$String1,$String2,$String3){
+#To use function, send it the Color of the message and up to 2 strings and a Pass/Fail/Warning string to write to audit result to files and console
+Function WriteResults ($Color,$String1,$String2,$PassFail){
     if ($Color -eq "Green") {$HtmlColor = "008000"; $ConsColor = "Green"}
     elseif ($Color -eq "Red") {$HtmlColor = "F00000"; $ConsColor = "Red"}
     elseif ($Color -eq "Yellow") {$HtmlColor = "FFC000"; $ConsColor = "Yellow"}
     else {$HtmlColor = "000000"; $ConsColor = "White"}
-    Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`">$String1 $String2 $String3</font>"
-    Add-Content -Path "$ResultsPath\$CsvFile" "$String1,$String2,$String3"
-    Write-Host -ForegroundColor $ConsColor $String1 $String2 $String3
+    Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`">$String1 $String2 $PassFail</font>"
+    Add-Content -Path "$ResultsPath\$CsvFile" "$String1,$String2,$PassFail"
+    Write-Host -ForegroundColor $ConsColor $String1 $String2 $PassFail
 }
 #endregion Write results to CSV, html file and PowerShell window
 
@@ -151,7 +151,7 @@ Get-Content $InputServerList | ForEach-Object {
         #region Check that Portico is installed and running
         WriteResults "Default" "Checking if Portico/ICM is installed and Running" "" ""
         $PorticoService = Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -Class Win32_Service} | Select-Object -property DisplayName,State | Where-Object {$_.DisplayName -eq "Cisco ICM Diagnostic Framework"} | Select-Object -expand State
-        if ($PorticoService -ne $null){
+        if ($null -ne $PorticoService){
             $global:IcmInstalled = $true
             WriteResults "Green" "- Portico/ICM is installed - Checking if it is Running" "" "Pass"
             if ($PorticoService -eq "Running"){
@@ -368,3 +368,6 @@ Get-Content $InputServerList | ForEach-Object {
         CloseHtml
     }
 }
+
+Write-Host "Audit Completed, Press any key to close this windows"
+[Console]::ReadKey()
