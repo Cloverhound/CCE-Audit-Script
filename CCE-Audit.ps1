@@ -1,4 +1,5 @@
 Set-Location -Path $PSScriptRoot
+Write-Host $PSScriptRoot
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 #$CredsSql
@@ -10,6 +11,7 @@ $global:ResultsPath = ".\AuditResults"
 $CredsCsv = ".\Creds.csv"
 $HTMLFile = "Initial.htm"
 $CsvFile = "Initial.csv"
+
 $CredsValid = $false
 $global:HTMLOuputStart = "<html><body><br><b>UCCE/PCCE Server Audit Report.</b></body><html>
 <html><body>"
@@ -145,6 +147,7 @@ WriteResults "Default" "Starting Audit Checks for list of servers" "" ""
 Get-Content $InputServerList | ForEach-Object {
     #region Setup Vars
     $HTMLFile = "$_.htm"
+    $CsvFile = "$_.csv"
     $IcmInstalled = $false
     $PorticoRunning = $false
     Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
