@@ -1,12 +1,13 @@
+Set-Location -Path $PSScriptRoot
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 #$CredsSql
 
 #region Initial Setup Vars
-$InputServerList = "C:\Temp\Servers.txt"
-$TempFolder = "C:\Temp"
-$global:ResultsPath = "C:\Temp\AuditResults"
-$CredsCsv = "C:\Temp\Creds.csv"
+$InputServerList = ".\Servers.txt"
+$CurrentFolder = "."
+$global:ResultsPath = ".\AuditResults"
+$CredsCsv = ".\Creds.csv"
 $HTMLFile = "Initial.htm"
 $CsvFile = "Initial.csv"
 $CredsValid = $false
@@ -60,14 +61,14 @@ Function CloseHtml {
 
 #region File, Folder and Credential Checks
 #Check to see if the Temp folder is present in c:
-Write-Host "Checking to see if the Temp folder is present in c:"
-if (Test-Path -Path $TempFolder){
+<#Write-Host "Checking to see if the Temp folder is present in c:"
+if (Test-Path -Path $CurrentFolder){
     Write-Host "Temp folder found, proceeding"
 }
 else{
     Write-Host "Temp folder NOT Found, creating one"
-    New-Item $TempFolder -ItemType "Directory"
-}
+    New-Item $CurrentFolder -ItemType "Directory"
+}#>
 
 #Check to see if the Audit Results folder is present
 Write-Host "Checking to see if the Audit Results folder is present"
