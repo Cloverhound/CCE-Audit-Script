@@ -1,14 +1,14 @@
 Set-Location -Path $PSScriptRoot
-Write-Host $PSScriptRoot
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 #$CredsSql
 
+#Note: This Script looks for two files, Servers.txt (Required) and Creds.csv (Optional) in the same folder where the script is.
 #region Initial Setup Vars
 $InputServerList = ".\Servers.txt"
 $CurrentFolder = "."
 $global:ResultsPath = ".\AuditResults"
-$CredsCsv = ".\Creds.csv"
+$CredsCsv = ".\Credsb.csv"
 $HTMLFile = "Initial.htm"
 $CsvFile = "Initial.csv"
 
@@ -62,16 +62,6 @@ Function CloseHtml {
 #endregion Functions
 
 #region File, Folder and Credential Checks
-#Check to see if the Temp folder is present in c:
-<#Write-Host "Checking to see if the Temp folder is present in c:"
-if (Test-Path -Path $CurrentFolder){
-    Write-Host "Temp folder found, proceeding"
-}
-else{
-    Write-Host "Temp folder NOT Found, creating one"
-    New-Item $CurrentFolder -ItemType "Directory"
-}#>
-
 #Check to see if the Audit Results folder is present
 Write-Host "Checking to see if the Audit Results folder is present"
 if (Test-Path -Path $ResultsPath){
@@ -133,7 +123,7 @@ While ($CredsValid -eq $false){
     }
     if ($LoginError -eq $true){
         WriteResults "Red" "- Credentials not valid or don't have proper privileges, prompting for credentials" "" ""
-        WriteResults "Red" "- Note: this error may also occur if the fist server in the list is invalid" "" ""
+        WriteResults "Red" "- Note: this error may also occur if the fist server in the list is invalid or not reachable" "" ""
         GetCredsWin
     }
     else{
