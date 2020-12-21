@@ -9,13 +9,14 @@ $global:ResultsPath = "C:\Temp\AuditResults"
 $CredsCsv = "C:\Temp\Creds.csv"
 $HTMLFile = "Initial.htm"
 $CsvFile = "Initial.csv"
+$CredsValid = $false
 $global:HTMLOuputStart = "<html><body><br><b>UCCE/PCCE Server Audit Report.</b></body><html>
 <html><body>"
 $global:HTMLOuputEnd = "</body></html>"
 #endregion Initial Setup Vars
 
 #region Functions
-#region Write results to CSV, html file and PowerShell window
+#Write results to CSV, html file and PowerShell window
 #To use function, send it the Color of the message and up to 2 strings and a Pass/Fail/Warning string to write to audit result to files and console
 Function WriteResults ($Color,$String1,$String2,$PassFail){
     if ($Color -eq "Green") {$HtmlColor = "008000"; $ConsColor = "Green"}
@@ -26,9 +27,8 @@ Function WriteResults ($Color,$String1,$String2,$PassFail){
     Add-Content -Path "$ResultsPath\$CsvFile" "$String1,$String2,$PassFail"
     Write-Host -ForegroundColor $ConsColor $String1 $String2 $PassFail
 }
-#endregion Write results to CSV, html file and PowerShell window
 
-#region Write Page file notice for malconfigured page files
+#Write Page file notice for malconfigured page files
 Function WritePFNotice($Color){
     WriteResults $Color "- It is recommended to configure the Swap File with an Inital and Max size of 1.5 x Memory" "" ""
     WriteResults $Color "- Use the below sizes to set the Swap File accordingly " "" ""
@@ -36,9 +36,8 @@ Function WritePFNotice($Color){
     WriteResults $Color "-  -  6GB RAM =  9216MB Page File |  4GB RAM =  6144MB Page File | 2GB RAM =  3072MB Page File" "" ""
     WriteResults $Color "-  -  Note that a change to the Page File may require a reboot" "" ""
 }
-#endregion Write Page file notice for malconfigured page files
 
-#region Make Web Request
+#Make Web Request
 Function MakeWebRequest ($Url){
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
     $global:WebReq = [System.Net.WebRequest]::Create($Url)
@@ -47,7 +46,6 @@ Function MakeWebRequest ($Url){
     $global:WebReq.Timeout = 15000
     $global:WebReq.Credentials = $CredsWin.GetNetworkCredential()
 }
-#endregion Make Web Request
 
 #Get Windows/ICM Admin credentials
 Function GetCredsWin {
@@ -60,6 +58,7 @@ Function CloseHtml {
 }
 #endregion Functions
 
+#region File, Folder and Credential Checks
 #Check to see if the Temp folder is present in c:
 Write-Host "Checking to see if the Temp folder is present in c:"
 if (Test-Path -Path $TempFolder){
@@ -87,9 +86,13 @@ Set-Content -Path "$ResultsPath\$CsvFile" ""
 WriteResults "Default" "Checking to see if the Server list is present" "" ""
 if (Test-Path -Path $InputServerList){
     WriteResults "Green" "- Server list file found, proceeding" "" "Pass"
+    if (("" -eq ($global:TestServer = Get-Content $InputServerList))-or($null -eq ($global:TestServer = Get-Content $InputServerList))){
+        WriteResults "Red" "- No Servers in List File - Nothing to check, exiting" "" ""
+        Exit
+    }
 }
 else{
-    WriteResults "Red" "File NOT Found - Nothing to check, exiting" "" ""
+    WriteResults "Red" "- File NOT Found - Nothing to check, exiting" "" ""
     CloseHtml
     Exit
 }
@@ -101,26 +104,46 @@ if (Test-Path -Path $CredsCsv){
     $UserCreds = Import-Csv -Path $CredsCsv
     if (($null -ne $UserCreds.username)-and($null -ne $UserCreds.pass)){
         #Read Windows and Portico credentials from CSV file
-        WriteResults "Green" "Loading Credentials from CSV, proceeding" "" ""
+        WriteResults "Green" "- Loading Credentials from CSV, proceeding" "" ""
         $password = ConvertTo-SecureString $UserCreds.pass -AsPlainText -Force
         $global:CredsWin = New-Object System.Management.Automation.PSCredential ($UserCreds.username, $password)
     }
     else{
-        WriteResults "Red" "Credentials not found in CSV, prompting for credentials"
+        WriteResults "Red" "- Credentials not found in CSV, prompting for credentials"
         GetCredsWin
     }
 }
 else{
-    WriteResults "Red" "Credentials CSV file NOT Found, prompting for credentials" "" ""
+    WriteResults "Red" "- Credentials CSV file NOT Found, prompting for credentials" "" ""
     GetCredsWin
 }
 
+#Check if credentials are valid
+WriteResults "Default" "Cechking credentials against the first server in the list to see if credentials are valid"
+While ($CredsValid -eq $false){
+    Try {
+        $LoginError = $false
+        $CredCheck = Invoke-Command -ComputerName $global:TestServer[0] -Credential $CredsWin -ErrorAction Stop {Get-WmiObject -Class win32_operatingsystem}
+    }
+    Catch {
+        $LoginError = $true
+    }
+    if ($LoginError -eq $true){
+        WriteResults "Red" "- Credentials not valid or don't have proper privileges, prompting for credentials" "" ""
+        WriteResults "Red" "- Note: this error may also occur if the fist server in the list is invalid" "" ""
+        GetCredsWin
+    }
+    else{
+        WriteResults "Green" "- Credentials are valid, continuing" "" ""
+        $CredsValid = $true
+    }
+}
+#endregion File, Folder and Credential Checks
 
-
+WriteResults "Default" "Starting Audit Checks for list of servers" "" ""
 Get-Content $InputServerList | ForEach-Object {
     #region Setup Vars
     $HTMLFile = "$_.htm"
-    $CsvFile = "$_.csv"
     $IcmInstalled = $false
     $PorticoRunning = $false
     Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
@@ -132,7 +155,7 @@ Get-Content $InputServerList | ForEach-Object {
     #endregion TempVars
 
     #Write Server name to results
-    WriteResults "Default" "Server -" $_ ""
+    WriteResults "Default" "Server - $($_)" "" ""
 
     #Check that the server is reachable
     WriteResults "Default" "Checking to see if $_ is online" "" ""
@@ -173,16 +196,14 @@ Get-Content $InputServerList | ForEach-Object {
         catch {$Resp = "error"}
         if ($Resp -eq "error")
         {
-            Write-Host "Unable to fetch $Url - Page"
-            return @()
-            $Resp.Close()
+            WriteResults "Red" "Unable to Fetch ICM Component List from Portico" "" "Fail"
         }
         else {
             $Reader = new-object System.IO.StreamReader($resp.GetResponseStream())
             [xml]$ResultXml = $Reader.ReadToEnd()
             $Services = @($ResultXml.ListAppServersReply.AppServerList.AppServer | Where-Object {$_.ProductComponentType -ne "Cisco ICM Diagnostic Framework"} | Where-Object {$_.ProductComponentType -ne "Administration Client"} | Select-Object -expand ProductComponentType)
             ForEach ($Service in $Services){
-                WriteResults "Green" "- "$Service " Found"
+                WriteResults "Green" "- $($Service) Found" "" "Pass"
             }
             $reader.Close()
             $resp.Close()
