@@ -61,6 +61,12 @@ Function GetCredsWin {
 Function CloseHtml {
     Add-Content "$ResultsPath\$HTMLFile" $HTMLOuputEnd
 }
+
+Function CloseScript {
+    CloseHtml
+    $endvar = [Console]::ReadKey()
+    Exit
+}
 #endregion Functions
 
 #region File, Folder and Credential Checks
@@ -84,17 +90,13 @@ if (Test-Path -Path $InputServerList){
     if (("" -eq ($global:TestServer = Get-Content $InputServerList))-or($null -eq ($global:TestServer = Get-Content $InputServerList))){
         WriteResults "Red" "- No Servers in List File - Nothing to check." "" ""
         WriteResults "Red" "- Exiting, press any key to exit script" "" ""
-        CloseHtml
-        $endvar = [Console]::ReadKey()
-        Exit
+        CloseScript
     }
 }
 else{
     WriteResults "Red" "- File NOT Found - Nothing to check." "" ""
     WriteResults "Red" "- Exiting, press any key to exit script" "" ""
-    CloseHtml
-    $endvar = [Console]::ReadKey()
-Exit
+    CloseScript
 }
 
 #Check to see if the Credentials CSV file is present
@@ -138,8 +140,7 @@ While ($CredsValid -eq $false){
         WriteResults "Red" "- Note: this error may also occur if the fist server in the list is invalid or not reachable" "" ""
         Write-Host ""
         WriteResults "Red" "- No more attemmpts remaining, exiting, press any key to exit script" "" ""
-        $endvar = [Console]::ReadKey()
-        Exit
+        CloseScript
     }
     else{
         WriteResults "Green" "- Credentials are valid, continuing" "" ""
@@ -384,18 +385,15 @@ Get-Content $InputServerList | ForEach-Object {
             }
         }
         #endregion Check NIC Priority
-
-        CloseHtml
     }
 
     #If Server not Reachable NOT continuing with Audit Checks
     Else{
         WriteResults "Red" "Server $_ is not reachable - Ensure server is online and attempt to audit again." "" "Fail"
-        CloseHtml
     }
 }
 
 Write-Host "" ; Write-Host "Audit Complete, resluts have been written to the following folder" ; Write-Host ""
 Write-Host $ResultsPath ; Write-Host ""
 Write-Host "Press any key to close this script"
-$endvar = [Console]::ReadKey()
+CloseScript
