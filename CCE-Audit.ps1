@@ -6,8 +6,9 @@ Set-Location -Path $PSScriptRoot
 #Note: This Script looks for two files, Servers.txt (Required) and Creds.csv (Optional) in the same folder where the script is.
 #region Initial Setup Vars
 $InputServerList = ".\Servers.txt"
-$CurrentFolder = "."
-$global:ResultsPath = ".\AuditResults"
+$ResultsFolder = "\AuditResults"
+$global:ResultsPath = "$PSScriptRoot$($ResultsFolder)"
+$global:CredCheckCount = 1
 $CredsCsv = ".\Credsb.csv"
 $HTMLFile = "Initial.htm"
 $CsvFile = "Initial.csv"
@@ -53,6 +54,7 @@ Function MakeWebRequest ($Url){
 #Get Windows/ICM Admin credentials
 Function GetCredsWin {
     $global:CredsWin = Get-Credential -Message "Enter Windows/ICM Admin Credentials"
+    $global:CredCheckCount++
 }
 
 #Write closing tags for HTML file
@@ -80,14 +82,19 @@ WriteResults "Default" "Checking to see if the Server list is present" "" ""
 if (Test-Path -Path $InputServerList){
     WriteResults "Green" "- Server list file found, proceeding" "" "Pass"
     if (("" -eq ($global:TestServer = Get-Content $InputServerList))-or($null -eq ($global:TestServer = Get-Content $InputServerList))){
-        WriteResults "Red" "- No Servers in List File - Nothing to check, exiting" "" ""
+        WriteResults "Red" "- No Servers in List File - Nothing to check." "" ""
+        WriteResults "Red" "- Exiting, press any key to exit script" "" ""
+        CloseHtml
+        $endvar = [Console]::ReadKey()
         Exit
     }
 }
 else{
-    WriteResults "Red" "- File NOT Found - Nothing to check, exiting" "" ""
+    WriteResults "Red" "- File NOT Found - Nothing to check." "" ""
+    WriteResults "Red" "- Exiting, press any key to exit script" "" ""
     CloseHtml
-    Exit
+    $endvar = [Console]::ReadKey()
+Exit
 }
 
 #Check to see if the Credentials CSV file is present
@@ -121,10 +128,18 @@ While ($CredsValid -eq $false){
     Catch {
         $LoginError = $true
     }
-    if ($LoginError -eq $true){
+    if (($LoginError -eq $true)-and ($global:CredCheckCount -lt 4)){
         WriteResults "Red" "- Credentials not valid or don't have proper privileges, prompting for credentials" "" ""
         WriteResults "Red" "- Note: this error may also occur if the fist server in the list is invalid or not reachable" "" ""
         GetCredsWin
+    }
+    elseif (($LoginError -eq $true)-and($global:CredCheckCount -ge 3)) {
+        WriteResults "Red" "- Credentials not valid or don't have proper privileges, prompting for credentials" "" ""
+        WriteResults "Red" "- Note: this error may also occur if the fist server in the list is invalid or not reachable" "" ""
+        Write-Host ""
+        WriteResults "Red" "- No more attemmpts remaining, exiting, press any key to exit script" "" ""
+        $endvar = [Console]::ReadKey()
+        Exit
     }
     else{
         WriteResults "Green" "- Credentials are valid, continuing" "" ""
@@ -380,5 +395,7 @@ Get-Content $InputServerList | ForEach-Object {
     }
 }
 
-Write-Host "Audit Completed, Press any key to close this windows"
-[Console]::ReadKey()
+Write-Host "" ; Write-Host "Audit Complete, resluts have been written to the following folder" ; Write-Host ""
+Write-Host $ResultsPath ; Write-Host ""
+Write-Host "Press any key to close this script"
+$endvar = [Console]::ReadKey()
