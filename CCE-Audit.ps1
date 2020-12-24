@@ -9,7 +9,7 @@ $InputServerList = ".\Servers.txt"
 $ResultsFolder = "\AuditResults"
 $global:ResultsPath = "$PSScriptRoot$($ResultsFolder)"
 $global:CredCheckCount = 1
-$CredsCsv = ".\Credsb.csv"
+$CredsCsv = ".\Creds.csv"
 $HTMLFile = "Initial.htm"
 $CsvFile = "Initial.csv"
 
@@ -60,6 +60,13 @@ Function GetCredsWin {
 #Write closing tags for HTML file
 Function CloseHtml {
     Add-Content "$ResultsPath\$HTMLFile" $HTMLOuputEnd
+}
+
+#Registry Reading function
+Function ReadReg ($RegHive,$RegPath,$ValueName,$Computer){
+    $Reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey($RegHive,$Computer)
+    $RegKey = $reg.OpenSubKey($RegPath)
+    $global:ValueData = $RegKey.GetValue($ValueName)
 }
 
 Function CloseScript {
@@ -220,6 +227,25 @@ Get-Content $InputServerList | ForEach-Object {
         }
         #endregion Get Installed ICM Components
 
+        #Check if IPv6 is globally disabled
+        WriteResults "Default" "Checking if IPv6 is globally disabled in the registry" "" ""
+        ReadReg "LocalMachine" "SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters" "DisabledComponents" $_
+        if ($ValueData -eq 255){
+            WriteResults "Green" "IPv6 has been globally disabled in the registry" "" "Pass"
+            $Ipv6DisReg = $true
+        }
+        elseif ($ValueData -eq -1){
+            WriteResults "Yellow" "IPv6 has been globally disabled in the registry" "" "Pass"
+            WriteResults "Yellow" "The following registry value should be set to 0x000000ff not 0xffffffff" "" ""
+            WriteResults "Yellow" "HKLM:SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\DisabledComponents" "" ""
+            WriteResults "Yellow" "Using 0xffffffff will cause the server to take longer to boot up during restarts" "" ""
+            $Ipv6DisReg = $true
+        }
+        else{
+            WriteResults "Yellow" "IPv6 NOT globally disabled in the registry, must check that it's disabled on NIC's" "" ""
+            $Ipv6DisReg = $false
+        }
+        
         #region Get Advanced NIC Properties
         WriteResults "Default" "Check to see if TCP Offload and Speed/Duplex setting are configured properly" "" ""
         Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-NetAdapterAdvancedProperty} | ForEach-Object {
