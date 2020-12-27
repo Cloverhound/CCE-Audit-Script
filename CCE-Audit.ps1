@@ -51,6 +51,25 @@ Function MakeWebRequest ($Url){
     $global:WebReq.Credentials = $CredsWin.GetNetworkCredential()
 }
 
+<#
+function Get-ServerICMInstance()
+{
+    $url = "https://$($server):7890/icm-dp/rest/DiagnosticPortal/ListConfigurationCategories"
+    Write-Host "Getting Configuration Categories From: $($url)"
+    $resultXml = Get-XmlFromUrl -url $url
+
+    $configs = $resultXml.ListConfigurationCategoriesReply.ConfigurationCategoryList.ConfigurationCategory
+    $instance = $null
+    foreach ($config in $configs)
+    {
+        $instance = ($config.Description | select-string -pattern "Instance=(?<instance>[^\s]+)").Matches[0].Groups['instance'].Value
+        if ($instance -ne $null -and $instance -ne '') { break }
+    }
+    
+    if ($instance -eq $null -or $instance -eq '') { $instance = 'none' }
+    return $instance
+}
+#>
 #Get Windows/ICM Admin credentials
 Function GetCredsWin {
     $global:CredsWin = Get-Credential -Message "Enter Windows/ICM Admin Credentials"
@@ -62,11 +81,18 @@ Function CloseHtml {
     Add-Content "$ResultsPath\$HTMLFile" $HTMLOuputEnd
 }
 
-#Registry Reading function
+#Read Registry Data for a Specific Value function
 Function ReadReg ($RegHive,$RegPath,$ValueName,$Computer){
     $Reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey($RegHive,$Computer)
     $RegKey = $reg.OpenSubKey($RegPath)
     $global:ValueData = $RegKey.GetValue($ValueName)
+}
+
+#Read Registry SubKeys for a Specific Path function
+Function ReadRegKey ($RegHive,$RegPath,$Computer){
+    $Reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey($RegHive,$Computer)
+    $global:RegKey = $reg.OpenSubKey($RegPath)
+    $global:RegSbuKeys = $RegKey.GetSubKeyNames()
 }
 
 Function CloseScript {
@@ -159,10 +185,11 @@ While ($CredsValid -eq $false){
 WriteResults "Default" "Starting Audit Checks for list of servers" "" ""
 Get-Content $InputServerList | ForEach-Object {
     #region Setup Vars
-    $HTMLFile = "$_.htm"
-    $CsvFile = "$_.csv"
-    $IcmInstalled = $false
-    $PorticoRunning = $false
+    $global:Server = $_
+    $HTMLFile = "$Server.htm"
+    $CsvFile = "$Server.csv"
+    $IcmInstalled=$PorticoRunning=$PrivateNic=$Router=$Logger=$Awhds=$Pg=$Cg=$CTIOS=$Dialer=$False
+    $LoggerSide=$LoggerDb=$AwDb=$HdsDb=""
     Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
     Set-Content -Path "$ResultsPath\$CsvFile" ""
     #endregion Setup Vars
@@ -172,21 +199,21 @@ Get-Content $InputServerList | ForEach-Object {
     #endregion TempVars
 
     #Write Server name to results
-    WriteResults "Default" "Server - $($_)" "" ""
+    WriteResults "Default" "Server - $($Server)" "" ""
 
     #Check that the server is reachable
-    WriteResults "Default" "Checking to see if $_ is online" "" ""
-    if (Test-Connection -Count 1 -Quiet $_){
-        WriteResults "Green" "Server $_ Online - Continuing with health chek items" "" "Pass"
+    WriteResults "Default" "Checking to see if $Server is online" "" ""
+    if (Test-Connection -Count 2 -Quiet $Server){
+        WriteResults "Green" "Server $Server Online - Continuing with health chek items" "" "Pass"
         
         #Get OS version
         WriteResults "Default" "Getting OS version" "" ""
-        $OS =  Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -Class win32_operatingsystem} | Select-Object @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | Select-Object -expand OS
+        $OS =  Invoke-Command -ComputerName $Server -Credential $CredsWin {Get-WmiObject -Class win32_operatingsystem} | Select-Object @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | Select-Object -expand OS
         WriteResults "Default" "- " $OS ""
         
         #region Check that Portico is installed and running
         WriteResults "Default" "Checking if Portico/ICM is installed and Running" "" ""
-        $PorticoService = Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-WmiObject -Class Win32_Service} | Select-Object -property DisplayName,State | Where-Object {$_.DisplayName -eq "Cisco ICM Diagnostic Framework"} | Select-Object -expand State
+        $PorticoService = Invoke-Command -ComputerName $Server -Credential $CredsWin {Get-WmiObject -Class Win32_Service} | Select-Object -property DisplayName,State | Where-Object {$_.DisplayName -eq "Cisco ICM Diagnostic Framework"} | Select-Object -expand State
         if ($null -ne $PorticoService){
             $global:IcmInstalled = $true
             WriteResults "Green" "- Portico/ICM is installed - Checking if it is Running" "" "Pass"
@@ -206,30 +233,74 @@ Get-Content $InputServerList | ForEach-Object {
         }
         #endregion Check that Portico is installed and running
 
+        #region Get ICM Instance(s)
+        WriteResults "Default" "Fetching ICM Inatance(s)"
+        ReadRegKey "LocalMachine" "SOFTWARE\Cisco Systems, Inc.\ICM" $Server
+        $InstancesFound = $RegSbuKeys | where {($_ -notmatch '\d\d\.\d')-and($_ -notin 'ActiveInstance','Performance','Serviceability','SNMP','SystemSettings','CertMon','Cisco SSL Configuration')}
+        If ($InstancesFound.Count -gt 0){
+            ForEach ($Instance in $InstancesFound){
+                WriteResults "Green" "- Instance $($Instance) Found" "" "Pass"
+            }   
+        }
+        else{WriteResults "Red" "No Instance Found" "" "Fail"}
+        #endregion Get ICM Instance(s)
+
         #region Get Installed ICM Components
         WriteResults "Default" "Checking to see what ICM Components are installed"
-        MakeWebRequest "https://$_`:7890/icm-dp/rest/DiagnosticPortal/ListAppServers"
-        try {$Resp = $WebReq.GetResponse()}
-        catch {$Resp = "error"}
-        if ($Resp -eq "error")
-        {
-            WriteResults "Red" "Unable to Fetch ICM Component List from Portico" "" "Fail"
-        }
-        else {
-            $Reader = new-object System.IO.StreamReader($resp.GetResponseStream())
-            [xml]$ResultXml = $Reader.ReadToEnd()
-            $Services = @($ResultXml.ListAppServersReply.AppServerList.AppServer | Where-Object {$_.ProductComponentType -ne "Cisco ICM Diagnostic Framework"} | Where-Object {$_.ProductComponentType -ne "Administration Client"} | Select-Object -expand ProductComponentType)
-            ForEach ($Service in $Services){
-                WriteResults "Green" "- $($Service) Found" "" "Pass"
+        ForEach ($Instance in $InstancesFound){
+            MakeWebRequest "https://$Server`:7890/icm-dp/rest/DiagnosticPortal/ListAppServers?InstanceName=$Instance"
+            try {$Resp = $WebReq.GetResponse()}
+            catch {$Resp = "error"}
+            if ($Resp -eq "error")
+            {
+                WriteResults "Red" "Unable to Fetch ICM Instance from Portico" "" "Fail"
             }
-            $reader.Close()
-            $resp.Close()
+            else {
+                $Reader = new-object System.IO.StreamReader($resp.GetResponseStream())
+                [xml]$ResultXml = $Reader.ReadToEnd()
+                $Services = @($ResultXml.ListAppServersReply.AppServerList.AppServer | Where-Object {$_.ProductComponentType -notin "Cisco ICM Diagnostic Framework","Administration Client"} | Select-Object -expand ProductComponentType)
+                ForEach ($Service in $Services){
+                    WriteResults "Green" "- $($Instance) - $($Service) Found" "" "Pass"
+                    if ($Service -like "Router*"){
+                        $Router = $true
+                    }
+                    if ($Service -like "Logger*"){
+                        $Logger = $true
+                        $LoggerSide = $Service.Substring(7,1)
+                        $LoggerDb = "$($Instance)_side$($LoggerSide)"
+                    }
+                    if ($Service -like "Peripheral Gateway*"){
+                        $Pg = $true
+                    }
+                    if ($Service -like "CTI Server*"){
+                        $Cg = $true
+                    }
+                    if ($Service -like "Administration and Data Server*"){
+                        $Awhds = $true
+                        $AwDb="$($Instance)_awdb"
+                        $HdsDb="$($Instance)_hds"
+                    }
+
+                }
+                $reader.Close()
+                $resp.Close()
+            }
         }
+        $Router
+        $Logger
+        $LoggerDb
+        $Pg
+        $Cg
+        $Awhds
+        $AwDb
+        $HdsDb
         #endregion Get Installed ICM Components
+
+        Exit
 
         #Check if IPv6 is globally disabled
         WriteResults "Default" "Checking if IPv6 is globally disabled in the registry" "" ""
-        ReadReg "LocalMachine" "SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters" "DisabledComponents" $_
+        ReadReg "LocalMachine" "SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters" "DisabledComponents" $Server
         if ($ValueData -eq 255){
             WriteResults "Green" "IPv6 has been globally disabled in the registry" "" "Pass"
             $Ipv6DisReg = $true
@@ -248,7 +319,7 @@ Get-Content $InputServerList | ForEach-Object {
         
         #region Get Advanced NIC Properties
         WriteResults "Default" "Check to see if TCP Offload and Speed/Duplex setting are configured properly" "" ""
-        Invoke-Command -ComputerName $_ -Credential $CredsWin {Get-NetAdapterAdvancedProperty} | ForEach-Object {
+        Invoke-Command -ComputerName $Server -Credential $CredsWin {Get-NetAdapterAdvancedProperty} | ForEach-Object {
             if ((($_.DisplayName -like "*Off*") -and ($_.DisplayValue -like "*Disabled*")) -or (($_.DisplayName -like "Speed*") -and ($_.DisplayValue -like "*1.0 Gbps Full*"))){
                 WriteResults "Green" "- $($_.Name) $($_.DisplayName)  $($_.DisplayValue)" "" "Pass"
             }
