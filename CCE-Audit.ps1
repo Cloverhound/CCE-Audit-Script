@@ -269,18 +269,23 @@ Get-Content $InputServerList | ForEach-Object {
                         $LoggerSide = $Service.Substring(7,1)
                         $LoggerDb = "$($Instance)_side$($LoggerSide)"
                     }
+                    if ($Service -like "Administration and Data Server*"){
+                        $Awhds = $true
+                        $AwDb="$($Instance)_awdb"
+                        $HdsDb="$($Instance)_hds"
+                    }
                     if ($Service -like "Peripheral Gateway*"){
                         $Pg = $true
                     }
                     if ($Service -like "CTI Server*"){
                         $Cg = $true
                     }
-                    if ($Service -like "Administration and Data Server*"){
-                        $Awhds = $true
-                        $AwDb="$($Instance)_awdb"
-                        $HdsDb="$($Instance)_hds"
+                    if ($Service -like "CTI OS Server*"){
+                        $CTIOS = $true
                     }
-
+                    if ($Service -like "Outbound Option Dialer*"){
+                        $Dialer = $true
+                    }
                 }
                 $reader.Close()
                 $resp.Close()
@@ -291,12 +296,14 @@ Get-Content $InputServerList | ForEach-Object {
         $LoggerDb
         $Pg
         $Cg
+        $CTIOS
+        $Dialer
         $Awhds
         $AwDb
         $HdsDb
         #endregion Get Installed ICM Components
 
-        Exit
+        #Exit
 
         #Check if IPv6 is globally disabled
         WriteResults "Default" "Checking if IPv6 is globally disabled in the registry" "" ""
@@ -348,16 +355,6 @@ Get-Content $InputServerList | ForEach-Object {
         }
         else {WriteResults "Red" "- Remote Desktop DISABLED" "" "Fail"}
         #enddregion Check if RDP is enabled
-
-
-        #region Check for AntiVirus
-        <#Get-WmiObject win32_product -ComputerName $_ | where {$_.Name -eq 'Microsoft Security Client'} | select -expand Name | ForEach-Object {
-            if ($_ -ne ""){
-                WriteResults "Green" "AntiVirus Installed" "" ""
-            }
-            else {WriteResults "Red" "NO AntiVirus Installed" "" ""}
-        }#>
-        #endregion
     
         #Check if CD Rom drive is assigned to Z:
         WriteResults "Default" "Checking to see if CD Rom has been reassigned to Z:" "" ""
@@ -413,8 +410,6 @@ Get-Content $InputServerList | ForEach-Object {
         WriteResults "Default" "Checking to see if Windows Updates are set to Manual" "" ""
         if ($OS -like "*2016*"){
             $reg = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {(Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU").NoAutoUpdate}
-	        #$regKey=$reg.OpenSubKey("SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU")
-            #$UpdateStatus = $regKey.GetValue('NoAutoUpdate')
             if ($UpdateStatus -eq 1){
                 WriteResults "Green" "- Windows Updates Set to manual" "" "Pass"
             }
@@ -422,8 +417,6 @@ Get-Content $InputServerList | ForEach-Object {
         }
         elseif($OS -like "*2012*"){
             $reg = Invoke-Command -ComputerName $_ -Credential $CredsWin -ScriptBlock {(Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update").AUOptions}
-            #$regKey=$reg.OpenSubKey("SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update")
-            #$UpdateStatus = $regKey.GetValue('AUOptions')
             if ($reg -eq 1){
                 WriteResults "Green" "- Windows Updates Set to manual" "" "Pass"
             }
