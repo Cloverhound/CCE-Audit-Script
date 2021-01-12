@@ -208,7 +208,7 @@ Get-Content $InputServerList | ForEach-Object {
             $IcmInstalled = $false
         }
         #endregion Check that Portico is installed and running
-        exit
+
         #region Get ICM Instance(s)
         WriteResults "Default" "Fetching ICM Inatance(s)"
         $IcmRegKeys = InvCmd {Get-ChildItem -PSPath 'HKLM:\SOFTWARE\Cisco Systems, Inc.\ICM\' -Name}
