@@ -32,7 +32,7 @@ Function WriteResults ($Color,$String1,$String2,$PassFail){
     Write-Host -ForegroundColor $ConsColor $String1 $String2 $PassFail
 }
 
-#Write Page file notice for malconfigured page files
+#Write notice for malconfigured Page-files
 Function WritePFNotice($Color){
     WriteResults $Color "- It is recommended to configure the Swap File with an Inital and Max size of 1.5 x Memory" "" ""
     WriteResults $Color "- Use the below sizes to set the Swap File accordingly " "" ""
@@ -66,7 +66,6 @@ Function CloseHtml {
 #Invocke Coammand to remote or local computer(s)
 Function InvCmd ($command){
     Invoke-Command -ComputerName $global:Server -Credential $global:CredsWin $command
-    #Write-Host $cmdRes $CredsWin $Server $command
 }
 #---------------------
 Function CloseScript {
@@ -156,9 +155,11 @@ While ($CredsValid -eq $false){
 }
 #endregion File, Folder and Credential Checks
 
+#region ---------------------------------------Start Audit---------------------------------------
 WriteResults "Default" "Starting Audit Checks for list of servers" "" ""
 Get-Content $InputServerList | ForEach-Object {
-    #region Setup Vars
+    #region Audit Setup vars and Check for Server
+    #Setup Vars
     $global:Server = $_
     $HTMLFile = "$Server.htm"
     $CsvFile = "$Server.csv"
@@ -166,11 +167,8 @@ Get-Content $InputServerList | ForEach-Object {
     $LoggerSide=$LoggerDb=$AwDb=$HdsDb=""
     Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
     Set-Content -Path "$ResultsPath\$CsvFile" ""
-    #endregion Setup Vars
-
-    #region TempVars
+    #TempVars
     $global:TwoNICs = $true
-    #endregion TempVars
 
     #Write Server name to results
     WriteResults "Default" "Server - $($Server)" "" ""
@@ -186,8 +184,10 @@ Get-Content $InputServerList | ForEach-Object {
         #| Select-Object @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | Select-Object -expand OS
         $OS = InvCmd {Get-WmiObject -Query "select * from win32_operatingsystem"} | Select-Object @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | Select-Object -expand OS
         WriteResults "Default" "- " $OS ""
+    #endregion
         
-        #region Check that Portico is installed and running
+        #region Get ICM info
+        #Check that Portico is installed and running
         WriteResults "Default" "Checking if Portico/ICM is installed and Running" "" ""
         $PorticoService = InvCmd {Get-WmiObject -Query "select * from win32_service where DisplayName='Cisco ICM Diagnostic Framework'"} | Select-Object -property State
         if ($PorticoService){
@@ -207,9 +207,8 @@ Get-Content $InputServerList | ForEach-Object {
             WriteResults "Red" "- - ICM must be installed on the server to be audited, only a limited audit will be run" "" "Fail"
             $IcmInstalled = $false
         }
-        #endregion Check that Portico is installed and running
 
-        #region Get ICM Instance(s)
+        #Get ICM Instance(s)
         WriteResults "Default" "Fetching ICM Inatance(s)"
         $IcmRegKeys = InvCmd {Get-ChildItem -PSPath 'HKLM:\SOFTWARE\Cisco Systems, Inc.\ICM\' -Name}
         $InstancesFound = $IcmRegKeys | where {($_ -notmatch '\d\d\.\d')-and($_ -notin 'ActiveInstance','Performance','Serviceability','SNMP','SystemSettings','CertMon','Cisco SSL Configuration')}
@@ -219,9 +218,8 @@ Get-Content $InputServerList | ForEach-Object {
             }   
         }
         else{WriteResults "Red" "No Instance Found" "" "Fail"}
-        #endregion Get ICM Instance(s)
 
-        #region Get Installed ICM Components
+        #Get Installed ICM Components
         WriteResults "Default" "Checking to see what ICM Components are installed"
         ForEach ($Instance in $InstancesFound){
             MakeWebRequest "https://$Server`:7890/icm-dp/rest/DiagnosticPortal/ListAppServers?InstanceName=$Instance"
@@ -277,7 +275,7 @@ Get-Content $InputServerList | ForEach-Object {
         $Awhds
         $AwDb
         $HdsDb#>
-        #endregion Get Installed ICM Components
+        #endregion Get ICM info
 
         #Check if IPv6 is globally disabled
         WriteResults "Default" "Checking if IPv6 is globally disabled in the registry" "" ""
@@ -298,19 +296,29 @@ Get-Content $InputServerList | ForEach-Object {
             $Ipv6DisReg = $false
         }
         
-        #region Get Advanced NIC Properties
+        #Check that TCP offload is Disabled and NIC speed is set to 1Gb Full Duplex
         WriteResults "Default" "Check to see if TCP Offload and Speed/Duplex setting are configured properly" "" ""
-        InvCmd {Get-NetAdapterAdvancedProperty} | ForEach-Object {
-            if ((($_.DisplayName -like "*Off*") -and ($_.DisplayValue -like "*Disabled*")) -or (($_.DisplayName -like "Speed*") -and ($_.DisplayValue -like "*1.0 Gbps Full*"))){
+        #Offload settings
+        InvCmd {Get-NetAdapterAdvancedProperty -DisplayName "*offload*"} | ForEach-Object {
+            if ($_.DisplayValue -like "*Disabled*"){
                 WriteResults "Green" "- $($_.Name) $($_.DisplayName)  $($_.DisplayValue)" "" "Pass"
             }
-            elseif ((($_.DisplayName -like "*Off*") -and ($_.DisplayValue -notlike "*Disabled*"))-or(($_.DisplayName -like "Speed*") -and ($_.DisplayValue -notlike "*1.0 Gbps Full*"))){
+            else {
                 WriteResults "Red" "- $($_.Name) $($_.DisplayName) $($_.DisplayValue)" "" "Fail"
             }
         }
-        #endregion Get Advanced NIC Properties
-    
-        #region Get Cisco ICM Services and Startup Type
+        #Speed-Duplex setting(s)
+        InvCmd {Get-NetAdapterAdvancedProperty -DisplayName "*speed*"} | ForEach-Object {
+            if ($_.DisplayValue -like "*1.0 Gbps Full*"){
+                WriteResults "Green" "- $($_.Name) $($_.DisplayName)  $($_.DisplayValue)" "" "Pass"
+            }
+            else {
+                WriteResults "Red" "- $($_.Name) $($_.DisplayName) $($_.DisplayValue)" "" "Fail"
+            }
+        }
+
+
+        #Get Cisco ICM Services and Startup Type
         WriteResults "Default" "Checking to see what ICM services are installed and their Startup Type" "" ""
         InvCmd {Get-WmiObject -Query "select * from win32_service where DisplayName like 'Cisco%'"}  | ForEach-Object {
             if (($_.StartMode -like "Auto*")-and($_.State -like "Running")){
@@ -320,16 +328,16 @@ Get-Content $InputServerList | ForEach-Object {
                 WriteResults "Red" "- $($_.DisplayName) - $($_.State) - $($_.StartMode)" "" "Fail"
             }
         }
-        #endregion Get Cisco ICM Services and Startup Type
     
-        #region Check if RDP is enabled
+        #Check if RDP is enabled
         WriteResults "Default" "Checking to see RDP Services are enabled" "" ""
         $RdpEnabled = InvCmd {Get-WmiObject Win32_TerminalServiceSetting -name "root\cimv2\TerminalServices"} | Select-Object -expand AllowTSConnections
         if ($RdpEnabled -eq 1){
             WriteResults "Green" "- Remote Desktop Enabled" "" "Pass"
         }
-        else {WriteResults "Red" "- Remote Desktop DISABLED" "" "Fail"}
-        #enddregion Check if RDP is enabled
+        else {
+            WriteResults "Red" "- Remote Desktop DISABLED" "" "Fail"
+        }
     
         #Check if CD Rom drive is assigned to Z:
         WriteResults "Default" "Checking to see if CD Rom has been reassigned to Z:" "" ""
@@ -357,7 +365,7 @@ Get-Content $InputServerList | ForEach-Object {
         }
         else {WriteResults "Red" "- WMI SNMP Provider NOT Installed - Should be installed" "" "Fail"}
 
-        #region Check Page file is hard set to 1.5x RAM size
+        #Check Page file is hard set to 1.5x RAM size
         WriteResults "Default" "Checking to see if Page file is configured to MS best practices" "" ""
         $MemSzMB = InvCmd {[Math]::Ceiling((Get-WmiObject win32_computersystem | Select-Object -ExpandProperty TotalPhysicalMemory) / 1048576 )}
         $sysManPgFil = InvCmd {Get-WmiObject win32_computersystem} | Select-Object -expand AutomaticManagedPagefile
@@ -391,9 +399,8 @@ Get-Content $InputServerList | ForEach-Object {
                 WritePFNotice "Yellow"
             }
         }
-        #endregion Check Page file is hard set to 1.5x RAM size
 
-        #region Check to see if Updates are Set to Manual
+        #Check to see if Updates are Set to Manual
         WriteResults "Default" "Checking to see if Windows Updates are set to Manual" "" ""
         if ($OS -like "*2016*"){
             $reg = InvCmd {(Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU").NoAutoUpdate}
@@ -409,9 +416,8 @@ Get-Content $InputServerList | ForEach-Object {
             }
             else{WriteResults "Yellow" "- Windows Updates enabled" "" "Warning"}
         }
-        #endregion Check to see if Updates are Set to Manual
 
-        #region Check for recently installed updates
+        #Check for recently installed updates
         WriteResults "Default" "Checking to see if Windows Updates have been installed in the last 60 days" "" ""
         $Hotfixes = InvCmd {Get-WmiObject win32_quickfixengineering}
         $LastUpdate = $Hotfixes.item(($Hotfixes.length - 1)).InstalledOn
@@ -420,9 +426,8 @@ Get-Content $InputServerList | ForEach-Object {
             WriteResults "Green" "- Windows Updates have been installed in the last 60 days" "" "Pass"
         }
         else{WriteResults "Red" "- NO Windows Updates have been installed in the last 60 days" "" "Fail"}
-        #endregion Check for recently installed updates
 
-        #region Check NIC Priority
+        #Check NIC Priority
         if($Router -or $Logger -or $Pg){
             WriteResults "Default" "Checking to see if NIC Binding Order/Interface Metric is configured properly" "" ""
             #2016 NIC Metric Check
@@ -464,7 +469,6 @@ Get-Content $InputServerList | ForEach-Object {
         else{
             WriteResults "Green" "- Server only requires 1 NIC, not checking binding order" "" "Pass"
         }
-        #endregion Check NIC Priority
     }
 
     #If Server not Reachable NOT continuing with Audit Checks
@@ -472,6 +476,7 @@ Get-Content $InputServerList | ForEach-Object {
         WriteResults "Red" "Server $Server is not reachable - Ensure server is online and attempt to audit again." "" "Fail"
     }
 }
+#endregion
 
 Write-Host "" ; Write-Host "Audit Complete, resluts have been written to the following folder" ; Write-Host ""
 Write-Host $ResultsPath ; Write-Host ""
