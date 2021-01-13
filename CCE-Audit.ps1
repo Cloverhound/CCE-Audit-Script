@@ -9,14 +9,33 @@ $InputServerList = ".\Servers.txt"
 $ResultsFolder = "\AuditResults"
 $global:ResultsPath = "$PSScriptRoot$($ResultsFolder)"
 $global:CredCheckCount = 1
-$CredsCsv = ".\Creds.csv"
+$WinCredsCsv = ".\WinCreds.csv"
+$SqlCredsCsv = ".\SqlCreds.csv"
 $HTMLFile = "InitAudit.htm"
 $CsvFile = "InitAudit.csv"
-
+#$integratedSqlLogin=$true
 $CredsValid = $false
 $global:HTMLOuputStart = "<html><body><br><b>UCCE/PCCE Server Audit Report.</b></body><html>
 <html><body>"
 $global:HTMLOuputEnd = "</body></html>"
+
+while ($SqlCredType -notin "Y","N"){
+    Write-Host "Enter " -NoNewline; Write-Host -ForegroundColor Yellow "Y" -NoNewline; Write-Host " to use Integrated authentication for SQL, or enter " -NoNewline
+    Write-Host -ForegroundColor Yellow "N" -NoNewline; Write-Host " to use SQL authentication"
+    $SqlCredType = Read-Host
+    if ($SqlCredType -in "Y","N"){
+        if ($SqlCredType -eq "Y"){
+            $integratedSqlLogin=$true
+        }
+        else{
+            $integratedSqlLogin=$false
+        }
+    }
+    else {
+        Write-Host "You must enter " -ForegroundColor Yellow -NoNewline; Write-Host "Y" -ForegroundColor Red -NoNewline;Write-Host " or " -ForegroundColor Yellow -NoNewline
+        Write-Host "N" -ForegroundColor Red -NoNewline; Write-Host " to continue" -ForegroundColor Yellow
+    }
+}
 #endregion Initial Setup Vars
 
 #region Functions
@@ -57,6 +76,10 @@ Function GetCredsWin {
     $global:CredCheckCount++
 }
 
+Function GetCredsSql {
+    $global:CredsSql = Get-Credential -Message "Enter SQL Credentials"
+}
+
 #Write closing tags for HTML file
 Function CloseHtml {
     Add-Content "$ResultsPath\$HTMLFile" $HTMLOuputEnd
@@ -67,7 +90,25 @@ Function CloseHtml {
 Function InvCmd ($command){
     Invoke-Command -ComputerName $global:Server -Credential $global:CredsWin $command
 }
-#---------------------
+
+function ExecuteSql($sql) {
+    $user = $CredsSql.Username
+    $pass = $CredsSql.GetNetworkCredential().Password
+    
+    if ($integratedSqlLogin)
+    {
+        $connection = new-object system.data.SqlClient.SQLConnection("Server=$($Server);Integrated Security=SSPI");
+    }
+    else 
+    {
+        $connection = new-object system.data.SqlClient.SQLConnection("Server=$($Server);User Id=$($user);Password=$($pass)")
+    }
+    $adapter = new-object System.Data.SqlClient.SqlDataAdapter ($sql, $connection)
+    $table = new-object System.Data.DataTable
+    $rowCount = $adapter.fill($table)
+    return ($table | Select-Object *)
+}
+
 Function CloseScript {
     CloseHtml
     $endvar = Read-Host
@@ -105,25 +146,45 @@ else{
     CloseScript
 }
 
-#Check to see if the Credentials CSV file is present
-WriteResults "Default" "Checking to see if the Credentials CSV File is present" "" ""
-if (Test-Path -Path $CredsCsv){
+#Check to see if the Windows/ICM Credentials CSV file is present
+WriteResults "Default" "Checking to see if the Windows/ICM credentials CSV file is present" "" ""
+if (Test-Path -Path $WinCredsCsv){
     #check to see if credentials are present in CSV file
-    $UserCreds = Import-Csv -Path $CredsCsv
+    $UserCreds = Import-Csv -Path $WinCredsCsv
     if (($null -ne $UserCreds.username)-and($null -ne $UserCreds.pass)){
         #Read Windows and Portico credentials from CSV file
-        WriteResults "Green" "- Loading Credentials from CSV, proceeding" "" ""
+        WriteResults "Green" "- Loading Windows/ICM credentials from CSV, proceeding" "" ""
         $password = ConvertTo-SecureString $UserCreds.pass -AsPlainText -Force
         $global:CredsWin = New-Object System.Management.Automation.PSCredential ($UserCreds.username, $password)
     }
     else{
-        WriteResults "Red" "- Credentials not found in CSV, prompting for credentials"
+        WriteResults "Red" "- Windows/ICM credentials not found in CSV, prompting for credentials"
         GetCredsWin
     }
 }
 else{
-    WriteResults "Red" "- Credentials CSV file NOT Found, prompting for credentials" "" ""
+    WriteResults "Red" "- Windows/ICM credentials CSV file NOT found, prompting for credentials" "" ""
     GetCredsWin
+}
+
+WriteResults "Default" "Checking to see if the SQL credentials CSV file is present" "" ""
+if (Test-Path -Path $SqlCredsCsv){
+    #check to see if credentials are present in CSV file
+    $UserCreds = Import-Csv -Path $SqlCredsCsv
+    if (($null -ne $UserCreds.username)-and($null -ne $UserCreds.pass)){
+        #Read Windows and Portico credentials from CSV file
+        WriteResults "Green" "- Loading SQL credentials from CSV, proceeding" "" ""
+        $password = ConvertTo-SecureString $UserCreds.pass -AsPlainText -Force
+        $global:CredsSql = New-Object System.Management.Automation.PSCredential ($UserCreds.username, $password)
+    }
+    else{
+        WriteResults "Red" "- SQL credentials not found in CSV, prompting for credentials"
+        GetCredsSql
+    }
+}
+else{
+    WriteResults "Red" "- SQL credentials CSV file NOT found, prompting for credentials" "" ""
+    GetCredsSql
 }
 
 #Check if credentials are valid
@@ -171,19 +232,141 @@ Get-Content $InputServerList | ForEach-Object {
     $global:TwoNICs = $true
 
     #Write Server name to results
-    WriteResults "Default" "Server - $($Server)" "" ""
+    WriteResults "Default" "Server - `'$Server`'" "" ""
 
     #Check that the server is reachable
-    WriteResults "Default" "Checking to see if $Server is online" "" ""
+    WriteResults "Default" "Checking to see if `'$Server`' is online" "" ""
     if (Test-Connection -Count 2 -Quiet $Server){
-        WriteResults "Green" "Server $Server Online - Continuing with health chek items" "" "Pass"
+        WriteResults "Green" "- Server `'$Server`' Online - Continuing with health chek items" "" "Pass"
         
         #Get OS version
         WriteResults "Default" "Getting OS version" "" ""
-        #$OS =  Invoke-Command -ComputerName $Server -Credential $CredsWin {Get-WmiObject -Class win32_operatingsystem} 
-        #| Select-Object @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | Select-Object -expand OS
         $OS = InvCmd {Get-WmiObject -Query "select * from win32_operatingsystem"} | Select-Object @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | Select-Object -expand OS
-        WriteResults "Default" "- " $OS ""
+        WriteResults "Green" "- $OS" "" ""
+
+        #Get OS License Status
+        WriteResults "Default" "Getting OS License Status" "" ""
+        $OSLic = InvCmd {(Get-WmiObject -Query "select * from SoftwareLicensingProduct"| Select-Object -expand LicenseStatus) -contains 1}
+        if ($OSLic -eq "True"){
+            WriteResults "Green" "- This copy if Windows is successfully activated" "" ""
+        }
+        else {
+            WriteResults "Red" "- This copy if Windows is NOT activated" "" ""
+        }
+
+        #Get the Servers Time Zone
+        WriteResults "Default" "Getting Server Time Zone" "" ""
+        $timeZone = InvCmd {Get-WmiObject -Query "select * from win32_timezone"} | Select-Object -expand Caption
+        WriteResults "Green" "- $timeZone" "" ""
+        
+        #Get the server that provides time synchronization for this server
+        WriteResults "Default" "Getting Time Server" "" ""
+        $timeServer = InvCmd {cmd /c $env:WINDIR\system32\w32tm.exe /query /source}
+        WriteResults "Green" "- $timeServer" "" ""
+        
+        #Get Processor Information
+        WriteResults "Default" "Getting Processor Type and Core Count" "" ""
+        $Cpu = InvCmd {Get-WmiObject -Query "select * from win32_processor"}
+        WriteResults "Green" "- $($Cpu.Name) with $($Cpu.NumberOfCores) cores" "" ""
+        
+        #Get RAM size
+        WriteResults "Default" "Getting RAM amount" "" ""
+        $Ram = InvCmd {"{0:N2}" -f ((Get-WmiObject -Query "select * from win32_computersystem" | Select-Object -expand TotalPhysicalMemory) / 1GB)}
+        WriteResults "Green" "- $($Ram)GB of RAM" "" ""
+
+        #Get Disk(s) and Disk size(s)
+        WriteResults "Default" "Getting Disk(s) and Disk size(s)" "" ""
+        $drives = InvCmd {Get-WmiObject -Query "select * from win32_logicaldisk where DriveType=3"}
+        $driveDetails = @();
+        $drives | ForEach-Object {$driveDetails += "$($_.DeviceID) $("{0:N2}" -f ($_.FreeSpace / 1GB)) GB Free / $("{0:N2}" -f ($_.Size / 1GB)) GB Total"}
+        foreach ($drive in $driveDetails){
+            WriteResults "Green" "- $($drive)" "" "" 
+        }
+
+        #Get Windows Firewall status
+        if ($OS -like "*2008*"){
+            WriteResults "Default" "Getting Windows Firewall Status - Server 2008R2" "" ""
+            $fwService = InvCmd {Get-WmiObject -Query "select * from win32_service where DisplayName like '%Windows Firewall%'"} | Select-Object -ExpandProperty Started
+            if ($fwService){
+                $fwNetworks = @("Domain","Private","Public")
+                WriteResults "Green" "- Windows Firewall service is Running" "" ""
+                foreach ($fwNetwork in $fwNetworks) {
+                    $fwNetCmd = "(cmd /c $env:WINDIR\system32\netsh.exe advfirewall show $fwNetwork | select-string -pattern `"State[ \t]*(?<state>.+)`" ).Matches[0].Groups['state'].Value"
+                    $fwNetworkStatus = InvCmd {$fwNetCmd}
+                    if ($fwNetworkStatus -eq "ON"){
+                        WriteResults "Red" "- $($fwNetwork) Firewall Network is ON" "" "" 
+                    }
+                    else {
+                        WriteResults "Green" "- - $($fwNetwork) Firewall Network is OFF" "" ""
+                    }
+                }
+            }
+            else {
+                WriteResults "Green" "- Windows Firewall service is not running" "" ""
+            }
+        }
+        else {
+            WriteResults "Default" "Getting Windows Firewall Status" "" ""
+            $fwService = InvCmd {Get-WmiObject -Query "select * from win32_service where DisplayName like '%Windows Firewall%'"} | Select-Object -ExpandProperty Started
+            if ($fwService){
+                $fwProfiles = InvCmd {Get-NetFirewallProfile}
+                $fwProfNames = @("Domain","Private","Public")
+                WriteResults "Green" "- Windows Firewall service is Running" "" ""
+                foreach ($fwProfName in $fwProfNames) {
+                    $fwProfStatus = $fwProfiles| Where-Object -eq Name $fwProfName | Select-Object -ExpandProperty Enabled
+                    if ($fwProfStatus){
+                        WriteResults "Red" "- - $fwProfName` Firewall Profile is ON" "" "" 
+                    }
+                    else {
+                        WriteResults "Green" "- - $fwProfName` Firewall Profile is OFF" "" ""
+                    }
+                }
+            }
+            else {
+                WriteResults "Green" "- Windows Firewall service is not running" "" ""
+            }
+        }
+
+        #Check if IPv6 is globally disabled
+        WriteResults "Default" "Checking if IPv6 is globally disabled in the registry" "" ""
+        $Ipv6RegData = InvCmd {Get-ItemProperty -PSPath 'HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\'} | Select-Object -ExpandProperty DisabledComponents
+        if ($Ipv6RegData -eq 255){
+            WriteResults "Green" "- IPv6 has been globally disabled in the registry" "" "Pass"
+            $Ipv6DisReg = $true
+        }
+        elseif ($Ipv6RegData -eq -1){
+            WriteResults "Yellow" "- IPv6 has been globally disabled in the registry" "" "Pass"
+            WriteResults "Yellow" "- The following registry value should be set to 0x000000ff not 0xffffffff" "" ""
+            WriteResults "Yellow" "- HKLM:SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\DisabledComponents" "" ""
+            WriteResults "Yellow" "- Using 0xffffffff will cause the server to take longer to boot up during restarts" "" ""
+            $Ipv6DisReg = $true
+        }
+        else{
+            WriteResults "Yellow" "- IPv6 NOT globally disabled in the registry, must check that it's disabled on NIC's" "" ""
+            $Ipv6DisReg = $false
+        }
+        
+        #Check that TCP offload is Disabled and NIC speed is set to 1Gb Full Duplex
+        WriteResults "Default" "Check to see if TCP Offload and Speed/Duplex setting are configured properly" "" ""
+        #Offload settings
+        InvCmd {Get-NetAdapterAdvancedProperty -DisplayName "*offload*"} | ForEach-Object {
+            if ($_.DisplayValue -like "*Disabled*"){
+                WriteResults "Green" "- $($_.Name) $($_.DisplayName)  $($_.DisplayValue)" "" "Pass"
+            }
+            else {
+                WriteResults "Red" "- $($_.Name) $($_.DisplayName) $($_.DisplayValue)" "" "Fail"
+            }
+        }
+        #Speed-Duplex setting(s)
+        InvCmd {Get-NetAdapterAdvancedProperty -DisplayName "*speed*"} | ForEach-Object {
+            if ($_.DisplayValue -like "*1.0 Gbps Full*"){
+                WriteResults "Green" "- $($_.Name) $($_.DisplayName)  $($_.DisplayValue)" "" "Pass"
+            }
+            else {
+                WriteResults "Red" "- $($_.Name) $($_.DisplayName) $($_.DisplayValue)" "" "Fail"
+            }
+        }
+
     #endregion
         
         #region Get ICM info
@@ -211,13 +394,38 @@ Get-Content $InputServerList | ForEach-Object {
         #Get ICM Instance(s)
         WriteResults "Default" "Fetching ICM Inatance(s)"
         $IcmRegKeys = InvCmd {Get-ChildItem -PSPath 'HKLM:\SOFTWARE\Cisco Systems, Inc.\ICM\' -Name}
-        $InstancesFound = $IcmRegKeys | where {($_ -notmatch '\d\d\.\d')-and($_ -notin 'ActiveInstance','Performance','Serviceability','SNMP','SystemSettings','CertMon','Cisco SSL Configuration')}
+        $InstancesFound = $IcmRegKeys | Where-Object {($_ -notmatch '\d\d\.\d')-and($_ -notin 'ActiveInstance','Performance','Serviceability','SNMP','SystemSettings','CertMon','Cisco SSL Configuration')}
         If ($InstancesFound.Count -gt 0){
             ForEach ($Instance in $InstancesFound){
                 WriteResults "Green" "- Instance $($Instance) Found" "" "Pass"
             }   
         }
         else{WriteResults "Red" "No Instance Found" "" "Fail"}
+
+        #Get ICM Version
+        WriteResults "Default" "Fetching ICM Version(s)"
+        ForEach ($Instance in $InstancesFound){
+            MakeWebRequest "https://$Server`:7890/icm-dp/rest/DiagnosticPortal/GetProductVersion?InstanceName=$Instance"
+            try {$Resp = $WebReq.GetResponse()}
+            catch {$Resp = "error"}
+            if ($Resp -eq "error")
+            {
+                WriteResults "Red" "Unable to Fetch ICM Version from Portico" "" "Fail"
+            }
+            else {
+                $Reader = new-object System.IO.StreamReader($resp.GetResponseStream())
+                [xml]$ResultXml = $Reader.ReadToEnd()
+                $Products = @($ResultXml.GetProductVersionReply |  Select-Object -expand ProductVersion)                
+                ForEach ($Product in $Products){
+                    WriteResults "Green" "- $Instance` - $($Product.Name) $($Product.VersionString) Found" "" "Pass"
+                    #Read-Host
+                }
+                $reader.Close()
+                $resp.Close()
+            }
+        }
+        $MajorIcmVer = $Products.Major
+        $MinorIcmVer = $Products.Minor
 
         #Get Installed ICM Components
         WriteResults "Default" "Checking to see what ICM Components are installed"
@@ -227,7 +435,7 @@ Get-Content $InputServerList | ForEach-Object {
             catch {$Resp = "error"}
             if ($Resp -eq "error")
             {
-                WriteResults "Red" "Unable to Fetch ICM Instance from Portico" "" "Fail"
+                WriteResults "Red" "Unable to Fetch ICM Components from Portico" "" "Fail"
             }
             else {
                 $Reader = new-object System.IO.StreamReader($resp.GetResponseStream())
@@ -277,44 +485,19 @@ Get-Content $InputServerList | ForEach-Object {
         $HdsDb#>
         #endregion Get ICM info
 
-        #Check if IPv6 is globally disabled
-        WriteResults "Default" "Checking if IPv6 is globally disabled in the registry" "" ""
-        $Ipv6RegData = InvCmd {Get-ItemProperty -PSPath 'HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\'} | Select-Object -ExpandProperty DisabledComponents
-        if ($Ipv6RegData -eq 255){
-            WriteResults "Green" "IPv6 has been globally disabled in the registry" "" "Pass"
-            $Ipv6DisReg = $true
-        }
-        elseif ($Ipv6RegData -eq -1){
-            WriteResults "Yellow" "IPv6 has been globally disabled in the registry" "" "Pass"
-            WriteResults "Yellow" "The following registry value should be set to 0x000000ff not 0xffffffff" "" ""
-            WriteResults "Yellow" "HKLM:SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\DisabledComponents" "" ""
-            WriteResults "Yellow" "Using 0xffffffff will cause the server to take longer to boot up during restarts" "" ""
-            $Ipv6DisReg = $true
-        }
-        else{
-            WriteResults "Yellow" "IPv6 NOT globally disabled in the registry, must check that it's disabled on NIC's" "" ""
-            $Ipv6DisReg = $false
-        }
-        
-        #Check that TCP offload is Disabled and NIC speed is set to 1Gb Full Duplex
-        WriteResults "Default" "Check to see if TCP Offload and Speed/Duplex setting are configured properly" "" ""
-        #Offload settings
-        InvCmd {Get-NetAdapterAdvancedProperty -DisplayName "*offload*"} | ForEach-Object {
-            if ($_.DisplayValue -like "*Disabled*"){
-                WriteResults "Green" "- $($_.Name) $($_.DisplayName)  $($_.DisplayValue)" "" "Pass"
-            }
-            else {
-                WriteResults "Red" "- $($_.Name) $($_.DisplayName) $($_.DisplayValue)" "" "Fail"
-            }
-        }
-        #Speed-Duplex setting(s)
-        InvCmd {Get-NetAdapterAdvancedProperty -DisplayName "*speed*"} | ForEach-Object {
-            if ($_.DisplayValue -like "*1.0 Gbps Full*"){
-                WriteResults "Green" "- $($_.Name) $($_.DisplayName)  $($_.DisplayValue)" "" "Pass"
-            }
-            else {
-                WriteResults "Red" "- $($_.Name) $($_.DisplayName) $($_.DisplayValue)" "" "Fail"
-            }
+        #Sql
+        WriteResults "Default" "Gettin SQL version" "" ""
+        if (($Logger -eq $true)-or($Awhds -eq $true)){
+            $SqlVerInfo = ExecuteSql("SELECT SERVERPROPERTY('productversion') AS Version, SERVERPROPERTY ('productlevel') AS ServicePack, SERVERPROPERTY ('edition') AS Edition")
+            $SqlVer = "- $($SqlVerInfo.Version) $($SqlVerInfo.ServicePack) $($SqlVerInfo.Edition)"
+            $SqlVer = $SqlVer -replace "14.0.[\.\d]*", "SQL Server 2016"
+            $SqlVer = $SqlVer -replace "12.0.[\.\d]*", "SQL Server 2014"
+            $SqlVer = $SqlVer -replace "11.[\.\d]*", "SQL Server 2012"
+            $SqlVer = $SqlVer -replace "10.50.[\.\d]*", "SQL Server 2008 R2"
+            $SqlVer = $SqlVer -replace "10.00.[\.\d]*", "SQL Server 2008"
+            $SqlVer = $SqlVer -replace "9.00.[\.\d]*", "SQL Server 2005"
+            $SqlVer = $SqlVer -replace "8.00.[\.\d]*", "SQL Server 2000"
+            WriteResults "Green" $SqlVer "" ""
         }
 
 
@@ -473,7 +656,7 @@ Get-Content $InputServerList | ForEach-Object {
 
     #If Server not Reachable NOT continuing with Audit Checks
     Else{
-        WriteResults "Red" "Server $Server is not reachable - Ensure server is online and attempt to audit again." "" "Fail"
+        WriteResults "Red" "- Server `'$Server`' is not reachable - Ensure server is online and attempt to audit again." "" "Fail"
     }
 }
 #endregion
