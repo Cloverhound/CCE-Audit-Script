@@ -1,1 +1,1 @@
-start C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -noprofile -executionpolicy bypass -file "C:\Users\user1\Documents\Code\PowerShell_Scripts\CCE-Audit-Script\CCE-Audit.ps1"
+start C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -executionpolicy bypass -file ".\CCE-Audit.ps1"
