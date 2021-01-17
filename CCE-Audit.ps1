@@ -15,6 +15,7 @@ $HTMLFile = "InitAudit.htm"
 $CsvFile = "InitAudit.csv"
 #$integratedSqlLogin=$true
 $CredsValid = $false
+$ShwResMsg = $true
 $global:HTMLOuputStart = "<html><body><br><b>UCCE/PCCE Server Audit Report.</b></body><html>
 <html><body>"
 $global:HTMLOuputEnd = "</body></html>"
@@ -41,23 +42,30 @@ while ($SqlCredType -notin "Y","N"){
 #region Functions
 #Write results to CSV, html file and PowerShell window
 #To use function, send it the Color of the message and up to 2 strings and a Pass/Fail/Warning string to write to audit result to files and console
-Function WriteResults ($Color,$String1,$String2,$PassFail){
-    if ($Color -eq "Green") {$HtmlColor = "008000"; $ConsColor = "Green"}
-    elseif ($Color -eq "Red") {$HtmlColor = "F00000"; $ConsColor = "Red"}
-    elseif ($Color -eq "Yellow") {$HtmlColor = "FFC000"; $ConsColor = "Yellow"}
+Function WriteResults ($msgStatus,$String1,$String2,$ShwResMsg){
+    if ($msgStatus -eq "Pass") {$HtmlColor = "008000"; $ConsColor = "Green"}
+    elseif ($msgStatus -eq "Fail") {$HtmlColor = "F00000"; $ConsColor = "Red"}
+    elseif ($msgStatus -eq "Warning") {$HtmlColor = "FFC000"; $ConsColor = "Yellow"}
     else {$HtmlColor = "000000"; $ConsColor = "White"}
-    Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`">$String1 $String2 $PassFail</font>"
-    Add-Content -Path "$ResultsPath\$CsvFile" "$String1,$String2,$PassFail"
-    Write-Host -ForegroundColor $ConsColor $String1 $String2 $PassFail
+    if ($ShwResMsg) {
+        Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`">$String1 $String2 $msgStatus</font>"
+        Add-Content -Path "$ResultsPath\$CsvFile" "$String1,$String2,$msgStatus"
+        Write-Host -ForegroundColor $ConsColor $String1 $String2 $msgStatus
+    }
+    else {
+        Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`">$String1 $String2</font>"
+        Add-Content -Path "$ResultsPath\$CsvFile" "$String1,$String2,"
+        Write-Host -ForegroundColor $ConsColor $String1 $String2
+    }
 }
 
 #Write notice for malconfigured Page-files
-Function WritePFNotice($Color){
-    WriteResults $Color "- It is recommended to configure the Swap File with an Inital and Max size of 1.5 x Memory" "" ""
-    WriteResults $Color "- Use the below sizes to set the Swap File accordingly " "" ""
-    WriteResults $Color "-  - 16GB RAM = 24576MB Page File | 12GB RAM = 18432MB Page File | 8GB RAM =  12288MB Page File" "" ""
-    WriteResults $Color "-  -  6GB RAM =  9216MB Page File |  4GB RAM =  6144MB Page File | 2GB RAM =  3072MB Page File" "" ""
-    WriteResults $Color "-  -  Note that a change to the Page File may require a reboot" "" ""
+Function WritePFNotice($msgStatus){
+    WriteResults $msgStatus "- It is recommended to configure the Swap File with an Inital and Max size of 1.5 x Memory" ""
+    WriteResults $msgStatus "- Use the below sizes to set the Swap File accordingly " ""
+    WriteResults $msgStatus "-  - 16GB RAM = 24576MB Page File | 12GB RAM = 18432MB Page File | 8GB RAM =  12288MB Page File" ""
+    WriteResults $msgStatus "-  -  6GB RAM =  9216MB Page File |  4GB RAM =  6144MB Page File | 2GB RAM =  3072MB Page File" ""
+    WriteResults $msgStatus "-  -  Note that a change to the Page File may require a reboot" ""
 }
 
 #Make Web Request
@@ -120,7 +128,7 @@ Function CloseScript {
 #Check to see if the Audit Results folder is present
 Write-Host "Checking to see if the Audit Results folder is present"
 if (Test-Path -Path $ResultsPath){
-    WriteResults "Green" "- Audit Results folder found, proceeding" "" "Pass"
+    WriteResults "Pass" "- Audit Results folder found, proceeding" "" $ShwResMsg
 }
 else{
     Write-Host "Audit Results folder NOT Found, creating one"
@@ -131,64 +139,64 @@ Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
 Set-Content -Path "$ResultsPath\$CsvFile" ""
 
 #Check to see if the Server list is present
-WriteResults "Default" "Checking to see if the Server list is present" "" ""
+WriteResults "Default" "Checking to see if the Server list is present" ""
 if (Test-Path -Path $InputServerList){
-    WriteResults "Green" "- Server list file found, proceeding" "" "Pass"
+    WriteResults "Pass" "- Server list file found, proceeding" "" $ShwResMsg
     if (("" -eq ($global:TestServer = Get-Content $InputServerList))-or($null -eq ($global:TestServer = Get-Content $InputServerList))){
-        WriteResults "Red" "- No Servers in List File - Nothing to check." "" ""
-        WriteResults "Red" "- Exiting, press any key to exit script" "" ""
+        WriteResults "Fail" "- No Servers in List File - Nothing to check." "" $ShwResMsg
+        WriteResults "Fail" "- Exiting, press any key to exit script" ""
         CloseScript
     }
 }
 else{
-    WriteResults "Red" "- File NOT Found - Nothing to check." "" ""
-    WriteResults "Red" "- Exiting, press any key to exit script" "" ""
+    WriteResults "Fail" "- File NOT Found - Nothing to check." "" $ShwResMsg
+    WriteResults "Fail" "- Exiting, press any key to exit script" ""
     CloseScript
 }
 
 #Check to see if the Windows/ICM Credentials CSV file is present
-WriteResults "Default" "Checking to see if the Windows/ICM credentials CSV file is present" "" ""
+WriteResults "Default" "Checking to see if the Windows/ICM credentials CSV file is present" ""
 if (Test-Path -Path $WinCredsCsv){
     #check to see if credentials are present in CSV file
     $UserCreds = Import-Csv -Path $WinCredsCsv
     if (($null -ne $UserCreds.username)-and($null -ne $UserCreds.pass)){
         #Read Windows and Portico credentials from CSV file
-        WriteResults "Green" "- Loading Windows/ICM credentials from CSV, proceeding" "" ""
+        WriteResults "Pass" "- Loading Windows/ICM credentials from CSV, proceeding" "" $ShwResMsg
         $password = ConvertTo-SecureString $UserCreds.pass -AsPlainText -Force
         $global:CredsWin = New-Object System.Management.Automation.PSCredential ($UserCreds.username, $password)
     }
     else{
-        WriteResults "Red" "- Windows/ICM credentials not found in CSV, prompting for credentials"
+        WriteResults "Fail" "- Windows/ICM credentials not found in CSV, prompting for credentials" $ShwResMsg
         GetCredsWin
     }
 }
 else{
-    WriteResults "Red" "- Windows/ICM credentials CSV file NOT found, prompting for credentials" "" ""
+    WriteResults "Fail" "- Windows/ICM credentials CSV file NOT found, prompting for credentials" "" $ShwResMsg
     GetCredsWin
 }
 
-WriteResults "Default" "Checking to see if the SQL credentials CSV file is present" "" ""
+WriteResults "Default" "Checking to see if the SQL credentials CSV file is present" ""
 if (Test-Path -Path $SqlCredsCsv){
     #check to see if credentials are present in CSV file
     $UserCreds = Import-Csv -Path $SqlCredsCsv
     if (($null -ne $UserCreds.username)-and($null -ne $UserCreds.pass)){
         #Read Windows and Portico credentials from CSV file
-        WriteResults "Green" "- Loading SQL credentials from CSV, proceeding" "" ""
+        WriteResults "Pass" "- Loading SQL credentials from CSV, proceeding" "" $ShwResMsg
         $password = ConvertTo-SecureString $UserCreds.pass -AsPlainText -Force
         $global:CredsSql = New-Object System.Management.Automation.PSCredential ($UserCreds.username, $password)
     }
     else{
-        WriteResults "Red" "- SQL credentials not found in CSV, prompting for credentials"
+        WriteResults "Fail" "- SQL credentials not found in CSV, prompting for credentials" $ShwResMsg
         GetCredsSql
     }
 }
 else{
-    WriteResults "Red" "- SQL credentials CSV file NOT found, prompting for credentials" "" ""
+    WriteResults "Fail" "- SQL credentials CSV file NOT found, prompting for credentials" "" $ShwResMsg
     GetCredsSql
 }
 
 #Check if credentials are valid
-WriteResults "Default" "Cechking credentials against the first server in the list to see if credentials are valid"
+WriteResults "Default" "Cechking credentials against the first server in the list to see if credentials are valid" ""
 While ($CredsValid -eq $false){
     Try {
         $LoginError = $false
@@ -198,172 +206,271 @@ While ($CredsValid -eq $false){
         $LoginError = $true
     }
     if (($LoginError -eq $true)-and ($global:CredCheckCount -lt 4)){
-        WriteResults "Red" "- Credentials not valid or don't have proper privileges, prompting for credentials" "" ""
-        WriteResults "Red" "- Note: this error may also occur if the fist server in the list is invalid or not reachable" "" ""
+        WriteResults "Fail" "- Credentials not valid or don't have proper privileges, prompting for credentials" "" $ShwResMsg
+        WriteResults "Fail" "- Note: this error may also occur if the fist server in the list is invalid or not reachable" ""
         GetCredsWin
     }
     elseif (($LoginError -eq $true)-and($global:CredCheckCount -ge 3)) {
-        WriteResults "Red" "- Credentials not valid or don't have proper privileges, prompting for credentials" "" ""
-        WriteResults "Red" "- Note: this error may also occur if the fist server in the list is invalid or not reachable" "" ""
+        WriteResults "Fail" "- Credentials not valid or don't have proper privileges, prompting for credentials" "" $ShwResMsg
+        WriteResults "Fail" "- Note: this error may also occur if the fist server in the list is invalid or not reachable" ""
         Write-Host ""
-        WriteResults "Red" "- No more attemmpts remaining, exiting, press any key to exit script" "" ""
+        WriteResults "Fail" "- No more attemmpts remaining, exiting, press any key to exit script" "" $ShwResMsg
         CloseScript
     }
     else{
-        WriteResults "Green" "- Credentials are valid, continuing" "" ""
+        WriteResults "Pass" "- Credentials are valid, continuing" "" $ShwResMsg
         $CredsValid = $true
     }
 }
 #endregion File, Folder and Credential Checks
 
 #region ---------------------------------------Start Audit---------------------------------------
-WriteResults "Default" "Starting Audit Checks for list of servers" "" ""
+WriteResults "Default" "Starting Audit Checks for list of servers" ""
 Get-Content $InputServerList | ForEach-Object {
     #region Audit Setup vars and Check for Server
-    #Setup Vars
+    #Setup Audit Vars
     $global:Server = $_
     $HTMLFile = "$Server.htm"
     $CsvFile = "$Server.csv"
     $IcmInstalled=$PorticoRunning=$PrivateNic=$Router=$Logger=$Awhds=$Pg=$Cg=$CTIOS=$Dialer=$False
     $LoggerSide=$LoggerDb=$AwDb=$HdsDb=""
+    $PubNicErr=$PrivNicErr=$false
     Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
     Set-Content -Path "$ResultsPath\$CsvFile" ""
-    #TempVars
-    $global:TwoNICs = $true
 
     #Write Server name to results
-    WriteResults "Default" "Server - `'$Server`'" "" ""
+    WriteResults "Default" "Server - `'$Server`'" ""
 
     #Check that the server is reachable
-    WriteResults "Default" "Checking to see if `'$Server`' is online" "" ""
+    WriteResults "Default" "Checking to see if `'$Server`' is online" ""
     if (Test-Connection -Count 2 -Quiet $Server){
-        WriteResults "Green" "- Server `'$Server`' Online - Continuing with health chek items" "" "Pass"
+        WriteResults "Pass" "- Server `'$Server`' Online - Continuing with health chek items" "" $ShwResMsg
         
+        
+
         #Get OS version
-        WriteResults "Default" "Getting OS version" "" ""
+        WriteResults "Default" "Getting OS version" ""
         $OS = InvCmd {Get-WmiObject -Query "select * from win32_operatingsystem"} | Select-Object @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | Select-Object -expand OS
-        WriteResults "Green" "- $OS" "" ""
+        WriteResults "Pass" "- $OS" ""
 
         #Get OS License Status
-        WriteResults "Default" "Getting OS License Status" "" ""
+        WriteResults "Default" "Getting OS License Status" ""
         $OSLic = InvCmd {(Get-WmiObject -Query "select * from SoftwareLicensingProduct"| Select-Object -expand LicenseStatus) -contains 1}
         if ($OSLic -eq "True"){
-            WriteResults "Green" "- This copy if Windows is successfully activated" "" ""
+            WriteResults "Pass" "- This copy if Windows is successfully activated" "" $ShwResMsg
         }
         else {
-            WriteResults "Red" "- This copy if Windows is NOT activated" "" ""
+            WriteResults "Fail" "- This copy if Windows is NOT activated" "" $ShwResMsg
         }
 
         #Get the Servers Time Zone
-        WriteResults "Default" "Getting Server Time Zone" "" ""
+        WriteResults "Default" "Getting Server Time Zone" ""
         $timeZone = InvCmd {Get-WmiObject -Query "select * from win32_timezone"} | Select-Object -expand Caption
-        WriteResults "Green" "- $timeZone" "" ""
+        WriteResults "Pass" "- $timeZone" ""
         
         #Get the server that provides time synchronization for this server
-        WriteResults "Default" "Getting Time Server" "" ""
+        WriteResults "Default" "Getting Time Server" ""
         $timeServer = InvCmd {cmd /c $env:WINDIR\system32\w32tm.exe /query /source}
-        WriteResults "Green" "- $timeServer" "" ""
+        WriteResults "Pass" "- $timeServer" ""
         
         #Get Processor Information
-        WriteResults "Default" "Getting Processor Type and Core Count" "" ""
+        WriteResults "Default" "Getting Processor Type and Core Count" ""
         $Cpu = InvCmd {Get-WmiObject -Query "select * from win32_processor"}
-        WriteResults "Green" "- $($Cpu.Name) with $($Cpu.NumberOfCores) cores" "" ""
+        WriteResults "Pass" "- $($Cpu.Name) with $($Cpu.NumberOfCores) cores" ""
         
         #Get RAM size
-        WriteResults "Default" "Getting RAM amount" "" ""
+        WriteResults "Default" "Getting RAM amount" ""
         $Ram = InvCmd {"{0:N2}" -f ((Get-WmiObject -Query "select * from win32_computersystem" | Select-Object -expand TotalPhysicalMemory) / 1GB)}
-        WriteResults "Green" "- $($Ram)GB of RAM" "" ""
+        WriteResults "Pass" "- $($Ram)GB of RAM" ""
 
-        #Get Disk(s) and Disk size(s)
-        WriteResults "Default" "Getting Disk(s) and Disk size(s)" "" ""
-        $drives = InvCmd {Get-WmiObject -Query "select * from win32_logicaldisk where DriveType=3"}
-        $driveDetails = @();
-        $drives | ForEach-Object {$driveDetails += "$($_.DeviceID) $("{0:N2}" -f ($_.FreeSpace / 1GB)) GB Free / $("{0:N2}" -f ($_.Size / 1GB)) GB Total"}
-        foreach ($drive in $driveDetails){
-            WriteResults "Green" "- $($drive)" "" "" 
+        #Check Page file is hard set to 1.5x RAM size
+        WriteResults "Default" "Checking to see if Page file is configured to MS best practices" ""
+        $MemSzMB = InvCmd {[Math]::Ceiling((Get-WmiObject win32_computersystem | Select-Object -ExpandProperty TotalPhysicalMemory) / 1048576 )}
+        $sysManPgFil = InvCmd {Get-WmiObject win32_computersystem} | Select-Object -expand AutomaticManagedPagefile
+        if ($sysManPgFil -eq "True"){
+            WriteResults "Fail" "- Page File Configred to be managed by system" "" $ShwResMsg
+            WritePFNotice "Fail"
+        }
+        else{
+            $PfSettings = InvCmd {Get-WmiObject -Class Win32_PageFileSetting}
+            $PfRangeLow = $MemSzMB*1.4 ; $PfRangeHigh = $MemSzMB*1.6
+            #Write-Host $PfSettings.InitialSize $PfSettings.MaximumSize
+            if ($PfSettings.InitialSize -eq $PfSettings.MaximumSize){
+                if (($PfSettings.MaximumSize -gt $PfRangeLow) -and ($PfSettings.MaximumSize -lt $PfRangeHigh)){
+                    WriteResults "Pass" "- Page File Configred to best practices" "" $ShwResMsg
+                }
+                elseif($PfSettings.MaximumSize -gt $PfRangeHigh){
+                    WriteResults "Warning" "- Page File Configred larger than typical installs" "" "Warning" $ShwResMsg
+                    WritePFNotice "Warning"
+                }
+                else{
+                    WriteResults "Fail" "- Page File Size Should be increased" "" $ShwResMsg
+                    WritePFNotice "Fail"
+                }
+            }
+            elseif($PfSettings.InitialSize -lt $PfRangeLow){
+                WriteResults "Fail" "- Page File Size Should be increased and both Initial and Max Values shoufl be the same" "" $ShwResMsg
+                WritePFNotice "Fail"
+            }
+            else{
+                WriteResults "Warning" "- Page File Size is large enough but both Initial and Max Values shoufl be the same" "" "Warning" $ShwResMsg
+                WritePFNotice "Warning"
+            }
         }
 
+        #Check if CD Rom drive is assigned to Z:
+        WriteResults "Default" "Checking to see if CD Rom has been reassigned to Z:" ""
+        $CdRomDrive = InvCmd {Get-WmiObject Win32_CDROMDrive} | Select-Object -ExpandProperty Drive
+        if ($CdRomDrive.Count -eq 1){
+            if ($CdRomDrive -eq "z:"){
+                WriteResults "Pass" "- CD Drive Assigned to Z:" "" $ShwResMsg
+            }
+            else {
+                WriteResults "Fail" "- CD Drive Assigned to $CdRomDrive - Should be reassigned to Z:" "" $ShwResMsg
+            }
+        }
+        elseif ($CdRomDrive.Count -eq 0) {
+            WriteResults "Fail" "- Virtual CD Drive MISSING, should have one assigned to Z:" "" $ShwResMsg
+        }
+        else {
+            WriteResults "Fail" "- MULTIPLE Virtual CD Drives present - $CdRomDrive, should have one assigned to Z:" "" $ShwResMsg
+        }
+
+        #Check if WMI SNMP Provider is installed
+        WriteResults "Default" "Checking to see if WMI SNMP Provider is installed" ""
+        $snmpInst = InvCmd {Get-WmiObject -Query "select * from win32_optionalfeature where Name='WMISnmpProvider'"} | Select-Object -expand InstallState
+        if ($snmpInst -eq "1"){
+            WriteResults "Pass" "- WMI SNMP Provider Installed" "" $ShwResMsg
+        }
+        else {
+            WriteResults "Fail" "- WMI SNMP Provider NOT Installed - Should be installed" "" $ShwResMsg
+        }
+
+        #Check if RDP is enabled
+        WriteResults "Default" "Checking to see RDP Services are enabled" ""
+        $RdpEnabled = InvCmd {Get-WmiObject Win32_TerminalServiceSetting -name "root\cimv2\TerminalServices"} | Select-Object -expand AllowTSConnections
+        if ($RdpEnabled -eq 1){
+            WriteResults "Pass" "- Remote Desktop Enabled" "" $ShwResMsg
+        }
+        else {
+            WriteResults "Fail" "- Remote Desktop DISABLED" "" $ShwResMsg
+        }
+    
         #Get Windows Firewall status
         if ($OS -like "*2008*"){
-            WriteResults "Default" "Getting Windows Firewall Status - Server 2008R2" "" ""
+            WriteResults "Default" "Getting Windows Firewall Status - Server 2008R2" ""
             $fwService = InvCmd {Get-WmiObject -Query "select * from win32_service where DisplayName like '%Windows Firewall%'"} | Select-Object -ExpandProperty Started
             if ($fwService){
                 $fwNetworks = @("Domain","Private","Public")
-                WriteResults "Green" "- Windows Firewall service is Running" "" ""
+                WriteResults "Pass" "- Windows Firewall service is Running" "" $ShwResMsg
                 foreach ($fwNetwork in $fwNetworks) {
                     $fwNetCmd = "(cmd /c $env:WINDIR\system32\netsh.exe advfirewall show $fwNetwork | select-string -pattern `"State[ \t]*(?<state>.+)`" ).Matches[0].Groups['state'].Value"
                     $fwNetworkStatus = InvCmd {$fwNetCmd}
                     if ($fwNetworkStatus -eq "ON"){
-                        WriteResults "Red" "- $($fwNetwork) Firewall Network is ON" "" "" 
+                        WriteResults "Fail" "- $($fwNetwork) Firewall Network is ON" ""  $ShwResMsg
                     }
                     else {
-                        WriteResults "Green" "- - $($fwNetwork) Firewall Network is OFF" "" ""
+                        WriteResults "Pass" "- - $($fwNetwork) Firewall Network is OFF" "" $ShwResMsg
                     }
                 }
             }
             else {
-                WriteResults "Green" "- Windows Firewall service is not running" "" ""
+                WriteResults "Pass" "- Windows Firewall service is not running" "" $ShwResMsg
             }
         }
         else {
-            WriteResults "Default" "Getting Windows Firewall Status" "" ""
+            WriteResults "Default" "Getting Windows Firewall Status" ""
             $fwService = InvCmd {Get-WmiObject -Query "select * from win32_service where DisplayName like '%Windows Firewall%'"} | Select-Object -ExpandProperty Started
             if ($fwService){
                 $fwProfiles = InvCmd {Get-NetFirewallProfile}
                 $fwProfNames = @("Domain","Private","Public")
-                WriteResults "Green" "- Windows Firewall service is Running" "" ""
+                WriteResults "Pass" "- Windows Firewall service is Running" "" $ShwResMsg
                 foreach ($fwProfName in $fwProfNames) {
                     $fwProfStatus = $fwProfiles| Where-Object -eq Name $fwProfName | Select-Object -ExpandProperty Enabled
                     if ($fwProfStatus){
-                        WriteResults "Red" "- - $fwProfName` Firewall Profile is ON" "" "" 
+                        WriteResults "Fail" "- - $fwProfName` Firewall Profile is ON" "" $ShwResMsg
                     }
                     else {
-                        WriteResults "Green" "- - $fwProfName` Firewall Profile is OFF" "" ""
+                        WriteResults "Pass" "- - $fwProfName` Firewall Profile is OFF" "" $ShwResMsg
                     }
                 }
             }
             else {
-                WriteResults "Green" "- Windows Firewall service is not running" "" ""
+                WriteResults "Pass" "- Windows Firewall service is not running" "" $ShwResMsg
             }
         }
 
+        #Check to see if Updates are Set to Manual
+        WriteResults "Default" "Checking to see if Windows Updates are set to Manual" ""
+        if ($OS -like "*2016*"){
+            $reg = InvCmd {(Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU").NoAutoUpdate}
+            if ($UpdateStatus -eq 1){
+                WriteResults "Pass" "- Windows Updates Set to manual" "" $ShwResMsg
+            }
+            else{
+                WriteResults "Warning" "- Windows Updates enabled" "" $ShwResMsg
+            }
+        }
+        elseif($OS -like "*2012*"){
+            $reg = InvCmd {(Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update").AUOptions}
+            if ($reg -eq 1){
+                WriteResults "Pass" "- Windows Updates Set to manual" "" $ShwResMsg
+            }
+            else{
+                WriteResults "Warning" "- Windows Updates enabled" "" "Warning" $ShwResMsg
+            }
+        }
+
+        #Check for recently installed updates
+        WriteResults "Default" "Checking to see if Windows Updates have been installed in the last 60 days" ""
+        $Hotfixes = InvCmd {Get-WmiObject win32_quickfixengineering}
+        $LastUpdate = $Hotfixes.item(($Hotfixes.length - 1)).InstalledOn
+        $Today = Get-Date ; $DateDif = $Today - $LastUpdate
+        if ($DateDif.Days -lt 60){
+            WriteResults "Pass" "- Windows Updates have been installed in the last 60 days" "" $ShwResMsg
+        }
+        else{
+            WriteResults "Fail" "- NO Windows Updates have been installed in the last 60 days" "" $ShwResMsg
+        }
+
         #Check if IPv6 is globally disabled
-        WriteResults "Default" "Checking if IPv6 is globally disabled in the registry" "" ""
-        $Ipv6RegData = InvCmd {Get-ItemProperty -PSPath 'HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\'} | Select-Object -ExpandProperty DisabledComponents
+        WriteResults "Default" "Checking if IPv6 is globally disabled in the registry" ""
+        try {$Ipv6RegData = InvCmd {Get-ItemProperty -PSPath 'HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\'} | Select-Object -ExpandProperty DisabledComponents -ErrorAction Stop}
+        catch {$Ipv6RegData=$null}
         if ($Ipv6RegData -eq 255){
-            WriteResults "Green" "- IPv6 has been globally disabled in the registry" "" "Pass"
+            WriteResults "Pass" "- IPv6 has been globally disabled in the registry" "" $ShwResMsg
             $Ipv6DisReg = $true
         }
         elseif ($Ipv6RegData -eq -1){
-            WriteResults "Yellow" "- IPv6 has been globally disabled in the registry" "" "Pass"
-            WriteResults "Yellow" "- The following registry value should be set to 0x000000ff not 0xffffffff" "" ""
-            WriteResults "Yellow" "- HKLM:SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\DisabledComponents" "" ""
-            WriteResults "Yellow" "- Using 0xffffffff will cause the server to take longer to boot up during restarts" "" ""
+            WriteResults "Warning" "- IPv6 has been globally disabled in the registry" "" $ShwResMsg
+            WriteResults "Warning" "- The following registry value should be set to 0x000000ff not 0xffffffff" ""
+            WriteResults "Warning" "- HKLM:SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\DisabledComponents" ""
+            WriteResults "Warning" "- Using 0xffffffff will cause the server to take longer to boot up during restarts" ""
             $Ipv6DisReg = $true
         }
         else{
-            WriteResults "Yellow" "- IPv6 NOT globally disabled in the registry, must check that it's disabled on NIC's" "" ""
+            WriteResults "Warning" "- IPv6 NOT globally disabled in the registry, must check that it's disabled on NIC's" "" $ShwResMsg
             $Ipv6DisReg = $false
         }
         
         #Check that TCP offload is Disabled and NIC speed is set to 1Gb Full Duplex
-        WriteResults "Default" "Check to see if TCP Offload and Speed/Duplex setting are configured properly" "" ""
+        WriteResults "Default" "Check to see if TCP Offload and Speed/Duplex setting are configured properly" ""
         #Offload settings
         InvCmd {Get-NetAdapterAdvancedProperty -DisplayName "*offload*"} | ForEach-Object {
             if ($_.DisplayValue -like "*Disabled*"){
-                WriteResults "Green" "- $($_.Name) $($_.DisplayName)  $($_.DisplayValue)" "" "Pass"
+                WriteResults "Pass" "- $($_.Name) $($_.DisplayName)  $($_.DisplayValue)" "" $ShwResMsg
             }
             else {
-                WriteResults "Red" "- $($_.Name) $($_.DisplayName) $($_.DisplayValue)" "" "Fail"
+                WriteResults "Fail" "- $($_.Name) $($_.DisplayName) $($_.DisplayValue)" "" $ShwResMsg
             }
         }
         #Speed-Duplex setting(s)
         InvCmd {Get-NetAdapterAdvancedProperty -DisplayName "*speed*"} | ForEach-Object {
             if ($_.DisplayValue -like "*1.0 Gbps Full*"){
-                WriteResults "Green" "- $($_.Name) $($_.DisplayName)  $($_.DisplayValue)" "" "Pass"
+                WriteResults "Pass" "- $($_.Name) $($_.DisplayName)  $($_.DisplayValue)" "" $ShwResMsg
             }
             else {
-                WriteResults "Red" "- $($_.Name) $($_.DisplayName) $($_.DisplayValue)" "" "Fail"
+                WriteResults "Fail" "- $($_.Name) $($_.DisplayName) $($_.DisplayValue)" "" $ShwResMsg
             }
         }
 
@@ -371,25 +478,25 @@ Get-Content $InputServerList | ForEach-Object {
         
         #region Get ICM info
         #Check that Portico is installed and running
-        WriteResults "Default" "Checking if Portico/ICM is installed and Running" "" ""
+        WriteResults "Default" "Checking if Portico/ICM is installed and Running" ""
         $PorticoService = InvCmd {Get-WmiObject -Query "select * from win32_service where DisplayName='Cisco ICM Diagnostic Framework'"} | Select-Object -property State
         if ($PorticoService){
             $global:IcmInstalled = $true
-            WriteResults "Green" "- Portico/ICM is installed - Checking if it is Running" "" "Pass"
+            WriteResults "Pass" "- Portico/ICM is installed - Checking if it is Running" ""
             if ($PorticoService.State -eq "Running"){
                 $global:PorticoRunning = $true
-                WriteResults "Green" "- - Portico/ICM is installed and Running" "" "Pass"
+                WriteResults "Pass" "- - Portico/ICM is installed and Running" "" $ShwResMsg
             }
             else{
                 $PorticoRunning = $false
-                WriteResults "Red" "- - Portico/ICM is installed - But NOT Running" "" "Fail"
+                WriteResults "Fail" "- - Portico/ICM is installed - But NOT Running" "" $ShwResMsg
             }
         }
         else{
-            WriteResults "Red" "- Unable to find Portico Service Ensure that servername in list is correct" "" "Fail"
-            WriteResults "Red" "- - ICM must be installed on the server to be audited, only a limited audit will be run" "" "Fail"
+            WriteResults "Fail" "- Unable to find Portico Service Ensure that servername in list is correct" "" $ShwResMsg
+            WriteResults "Fail" "- - ICM must be installed on the server to be audited, only a limited audit will be run" ""
             $IcmInstalled = $false
-        }
+        } 
 
         #Get ICM Instance(s)
         WriteResults "Default" "Fetching ICM Inatance(s)"
@@ -397,10 +504,12 @@ Get-Content $InputServerList | ForEach-Object {
         $InstancesFound = $IcmRegKeys | Where-Object {($_ -notmatch '\d\d\.\d')-and($_ -notin 'ActiveInstance','Performance','Serviceability','SNMP','SystemSettings','CertMon','Cisco SSL Configuration')}
         If ($InstancesFound.Count -gt 0){
             ForEach ($Instance in $InstancesFound){
-                WriteResults "Green" "- Instance $($Instance) Found" "" "Pass"
+                WriteResults "Pass" "- Instance $($Instance) Found" "" $ShwResMsg
             }   
         }
-        else{WriteResults "Red" "No Instance Found" "" "Fail"}
+        else{
+            WriteResults "Fail" "No Instance Found" "" $ShwResMsg
+        }
 
         #Get ICM Version
         WriteResults "Default" "Fetching ICM Version(s)"
@@ -410,14 +519,14 @@ Get-Content $InputServerList | ForEach-Object {
             catch {$Resp = "error"}
             if ($Resp -eq "error")
             {
-                WriteResults "Red" "Unable to Fetch ICM Version from Portico" "" "Fail"
+                WriteResults "Fail" "Unable to Fetch ICM Version from Portico" "" $ShwResMsg
             }
             else {
                 $Reader = new-object System.IO.StreamReader($resp.GetResponseStream())
                 [xml]$ResultXml = $Reader.ReadToEnd()
                 $Products = @($ResultXml.GetProductVersionReply |  Select-Object -expand ProductVersion)                
                 ForEach ($Product in $Products){
-                    WriteResults "Green" "- $Instance` - $($Product.Name) $($Product.VersionString) Found" "" "Pass"
+                    WriteResults "Pass" "- $Instance` - $($Product.Name) $($Product.VersionString) Found" "" $ShwResMsg
                     #Read-Host
                 }
                 $reader.Close()
@@ -427,6 +536,7 @@ Get-Content $InputServerList | ForEach-Object {
         $MajorIcmVer = $Products.Major
         $MinorIcmVer = $Products.Minor
 
+
         #Get Installed ICM Components
         WriteResults "Default" "Checking to see what ICM Components are installed"
         ForEach ($Instance in $InstancesFound){
@@ -435,14 +545,14 @@ Get-Content $InputServerList | ForEach-Object {
             catch {$Resp = "error"}
             if ($Resp -eq "error")
             {
-                WriteResults "Red" "Unable to Fetch ICM Components from Portico" "" "Fail"
+                WriteResults "Fail" "Unable to Fetch ICM Components from Portico" "" $ShwResMsg
             }
             else {
                 $Reader = new-object System.IO.StreamReader($resp.GetResponseStream())
                 [xml]$ResultXml = $Reader.ReadToEnd()
                 $Services = @($ResultXml.ListAppServersReply.AppServerList.AppServer | Where-Object {$_.ProductComponentType -notin "Cisco ICM Diagnostic Framework","Administration Client"} | Select-Object -expand ProductComponentType)
                 ForEach ($Service in $Services){
-                    WriteResults "Green" "- $($Instance) - $($Service) Found" "" "Pass"
+                    WriteResults "Pass" "- $($Instance) - $($Service) Found" "" $ShwResMsg
                     if ($Service -like "Router*"){
                         $Router = $true
                     }
@@ -485,9 +595,20 @@ Get-Content $InputServerList | ForEach-Object {
         $HdsDb#>
         #endregion Get ICM info
 
-        #Sql
-        WriteResults "Default" "Gettin SQL version" "" ""
+        #Get Cisco ICM Services and Startup Type
+        WriteResults "Default" "Checking to see what ICM services are installed and their Startup Type" ""
+        InvCmd {Get-WmiObject -Query "select * from win32_service where DisplayName like 'Cisco%'"}  | ForEach-Object {
+            if (($_.StartMode -like "Auto*")-and($_.State -like "Running")){
+                WriteResults "Pass" "- $($_.DisplayName) - $($_.State) - $($_.StartMode)" "" $ShwResMsg
+            }
+            elseif (($_.StartMode -notlike "Auto*")-or($_.State -notlike "Running")) {
+                WriteResults "Fail" "- $($_.DisplayName) - $($_.State) - $($_.StartMode)" "" $ShwResMsg
+            }
+        }
+    
+        #Get SQL version for Servers that use SQL
         if (($Logger -eq $true)-or($Awhds -eq $true)){
+            WriteResults "Default" "Gettin SQL version" ""
             $SqlVerInfo = ExecuteSql("SELECT SERVERPROPERTY('productversion') AS Version, SERVERPROPERTY ('productlevel') AS ServicePack, SERVERPROPERTY ('edition') AS Edition")
             $SqlVer = "- $($SqlVerInfo.Version) $($SqlVerInfo.ServicePack) $($SqlVerInfo.Edition)"
             $SqlVer = $SqlVer -replace "14.0.[\.\d]*", "SQL Server 2016"
@@ -497,166 +618,244 @@ Get-Content $InputServerList | ForEach-Object {
             $SqlVer = $SqlVer -replace "10.00.[\.\d]*", "SQL Server 2008"
             $SqlVer = $SqlVer -replace "9.00.[\.\d]*", "SQL Server 2005"
             $SqlVer = $SqlVer -replace "8.00.[\.\d]*", "SQL Server 2000"
-            WriteResults "Green" $SqlVer "" ""
+            WriteResults "Pass" $SqlVer "" "" $ShwResMsg
         }
 
 
-        #Get Cisco ICM Services and Startup Type
-        WriteResults "Default" "Checking to see what ICM services are installed and their Startup Type" "" ""
-        InvCmd {Get-WmiObject -Query "select * from win32_service where DisplayName like 'Cisco%'"}  | ForEach-Object {
-            if (($_.StartMode -like "Auto*")-and($_.State -like "Running")){
-                WriteResults "Green" "- $($_.DisplayName) - $($_.State) - $($_.StartMode)" "" "Pass"
+        #Get Disk(s) and Disk size(s)
+        WriteResults "Default" "Getting Disk(s) and Disk size(s)" ""
+        $drives = InvCmd {Get-WmiObject -Query "select * from win32_logicaldisk where DriveType=3"}
+        $driveDetails = @();
+        $drives | ForEach-Object {$driveDetails += "$($_.DeviceID) $("{0:N2}" -f ($_.FreeSpace / 1GB)) GB Free / $("{0:N2}" -f ($_.Size / 1GB)) GB Total"}
+        foreach ($drive in $driveDetails){
+            if ($drive -like "*C:*") {
+                WriteResults "Pass" "- $drive" "" $ShwResMsg
             }
-            elseif (($_.StartMode -notlike "Auto*")-or($_.State -notlike "Running")) {
-                WriteResults "Red" "- $($_.DisplayName) - $($_.State) - $($_.StartMode)" "" "Fail"
-            }
-        }
-    
-        #Check if RDP is enabled
-        WriteResults "Default" "Checking to see RDP Services are enabled" "" ""
-        $RdpEnabled = InvCmd {Get-WmiObject Win32_TerminalServiceSetting -name "root\cimv2\TerminalServices"} | Select-Object -expand AllowTSConnections
-        if ($RdpEnabled -eq 1){
-            WriteResults "Green" "- Remote Desktop Enabled" "" "Pass"
-        }
-        else {
-            WriteResults "Red" "- Remote Desktop DISABLED" "" "Fail"
-        }
-    
-        #Check if CD Rom drive is assigned to Z:
-        WriteResults "Default" "Checking to see if CD Rom has been reassigned to Z:" "" ""
-        $CdRomDrive = InvCmd {Get-WmiObject -Query "select * from win32_logicaldisk where DriveType=5"} |Select-Object -expand DeviceID
-        if ($CdRomDrive.Count -eq 1){
-            if ($CdRomDrive -eq "z:"){
-                WriteResults "Green" "- CD Drive Assigned to Z:" "" "Pass"
+            elseif (($Logger)-or($Awhds)) {
+                WriteResults "Pass" "- $drive" "" $ShwResMsg
             }
             else {
-                WriteResults "Red" "- CD Drive Assigned to $CdRomDrive - Should be reassigned to Z:" "" "Fail"
-            }
-        }
-        elseif ($CdRomDrive.Count -eq 0) {
-            WriteResults "Red" "- Virtual CD Drive MISSING, should have one assigned to Z:" "" "Fail"
-        }
-        else {
-            WriteResults "Red" "- MULTIPLE Virtual CD Drives present - $CdRomDrive, should have one assigned to Z:" "" "Fail"
-        }
-
-        #Check if WMI SNMP Provider is installed
-        WriteResults "Default" "Checking to see if WMI SNMP Provider is installed" "" ""
-        $snmpInst = InvCmd {Get-WmiObject -Query "select * from win32_optionalfeature where Name='WMISnmpProvider'"} | Select-Object -expand InstallState
-        if ($snmpInst -eq "1"){
-            WriteResults "Green" "- WMI SNMP Provider Installed" "" "Pass"
-        }
-        else {WriteResults "Red" "- WMI SNMP Provider NOT Installed - Should be installed" "" "Fail"}
-
-        #Check Page file is hard set to 1.5x RAM size
-        WriteResults "Default" "Checking to see if Page file is configured to MS best practices" "" ""
-        $MemSzMB = InvCmd {[Math]::Ceiling((Get-WmiObject win32_computersystem | Select-Object -ExpandProperty TotalPhysicalMemory) / 1048576 )}
-        $sysManPgFil = InvCmd {Get-WmiObject win32_computersystem} | Select-Object -expand AutomaticManagedPagefile
-        if ($sysManPgFil -eq "True"){
-            WriteResults "Red" "- Page File Configred to be managed by system" "" "Fail"
-            WritePFNotice "Red"
-        }
-        else{
-            $PfSettings = InvCmd {Get-WmiObject -Class Win32_PageFileSetting}
-            $PfRangeLow = $MemSzMB*1.4 ; $PfRangeHigh = $MemSzMB*1.6
-            #Write-Host $PfSettings.InitialSize $PfSettings.MaximumSize
-            if ($PfSettings.InitialSize -eq $PfSettings.MaximumSize){
-                if (($PfSettings.MaximumSize -gt $PfRangeLow) -and ($PfSettings.MaximumSize -lt $PfRangeHigh)){
-                    WriteResults "Green" "- Page File Configred to best practices" "" "Pass"
-                }
-                elseif($PfSettings.MaximumSize -gt $PfRangeHigh){
-                    WriteResults "Yellow" "- Page File Configred larger than typical installs" "" "Warning"
-                    WritePFNotice "Yellow"
-                }
-                else{
-                    WriteResults "Red" "- Page File Size Should be increased" "" "Fail"
-                    WritePFNotice "Red"
-                }
-            }
-            elseif($PfSettings.InitialSize -lt $PfRangeLow){
-                WriteResults "Red" "- Page File Size Should be increased and both Initial and Max Values shoufl be the same" "" "Fail"
-                WritePFNotice "Red"
-            }
-            else{
-                WriteResults "Yellow" "- Page File Size is large enough but both Initial and Max Values shoufl be the same" "" "Warning"
-                WritePFNotice "Yellow"
+                WriteResults "Warning" "- $drive - This server does not have ICM components that require additional disks" "" $ShwResMsg
             }
         }
 
-        #Check to see if Updates are Set to Manual
-        WriteResults "Default" "Checking to see if Windows Updates are set to Manual" "" ""
-        if ($OS -like "*2016*"){
-            $reg = InvCmd {(Get-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU").NoAutoUpdate}
-            if ($UpdateStatus -eq 1){
-                WriteResults "Green" "- Windows Updates Set to manual" "" "Pass"
-            }
-            else{WriteResults "Yellow" "- Windows Updates enabled" "" "Warning"}
-        }
-        elseif($OS -like "*2012*"){
-            $reg = InvCmd {(Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update").AUOptions}
-            if ($reg -eq 1){
-                WriteResults "Green" "- Windows Updates Set to manual" "" "Pass"
-            }
-            else{WriteResults "Yellow" "- Windows Updates enabled" "" "Warning"}
-        }
-
-        #Check for recently installed updates
-        WriteResults "Default" "Checking to see if Windows Updates have been installed in the last 60 days" "" ""
-        $Hotfixes = InvCmd {Get-WmiObject win32_quickfixengineering}
-        $LastUpdate = $Hotfixes.item(($Hotfixes.length - 1)).InstalledOn
-        $Today = Get-Date ; $DateDif = $Today - $LastUpdate
-        if ($DateDif.Days -lt 60){
-            WriteResults "Green" "- Windows Updates have been installed in the last 60 days" "" "Pass"
-        }
-        else{WriteResults "Red" "- NO Windows Updates have been installed in the last 60 days" "" "Fail"}
-
-        #Check NIC Priority
-        if($Router -or $Logger -or $Pg){
-            WriteResults "Default" "Checking to see if NIC Binding Order/Interface Metric is configured properly" "" ""
-            #2016 NIC Metric Check
-            if ($OS -like "*2016*"){
-                WriteResults "Default" "- Server 2016 Found Checking Interface Metric" "" ""
-                $pubMetric = InvCmd {get-netipinterface -interfacealias *public* -AddressFamily IPv4 | Select-Object -expand interfacemetric}
-                $priMetric = InvCmd {get-netipinterface -interfacealias *private* -AddressFamily IPv4 | Select-Object -expand interfacemetric}
-                if ($pubMetric -lt $priMetric){
-                    WriteResults "Green" "- NIC Metric Priority correctly configured Public - NIC = $pubMetric and Private NIC = $priMetric" "" "Pass"
-                }
-                else{
-                   WriteResults "Red" "- NIC Metric Priority NOT correctly configured - Public NIC = $pubMetric and Private NIC = $priMetric" "" "Fail"
-                    WriteResults "Red" "- - Public NIC should have a lower Metric value than the Priate NIC" "" "Fail"
-                }
-            }
-
-            #2012 R2 Binding Order Check
-            else{
-                WriteResults "Default" "- Server 2012 Found Checking Binding Order" "" ""
-                $Binding = InvCmd {Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Linkage"} | Select-Object -expand Bind
-                $BindingOrder = @()
-                ForEach ($Bind in $Binding)
-                {
-                    $DeviceId = $Bind.Split("\")[2]
-                    $Adapter = InvCmd {Get-WmiObject Win32_Networkadapter} | Where-Object {$_.GUID -like "$DeviceId" } | Select-Object -expand NetConnectionId
-                    if (($Adapter -like '*public*')-or($Adapter -like '*private*')){
-                        $BindingOrder += $Adapter
-                    }
-                }
-                if (($BindingOrder[0] -like '*public*')-and($BindingOrder[1] -like '*private*')){
-                    WriteResults "Green" "- Binding Order correctly configured - $($BindingOrder[0]) above $($BindingOrder[1])" "" "Pass"
+        #Get Data drive (D:) Volume name for AW-HDS and Logger servers
+        if (($Awhds)-or($Logger)){
+            WriteResults "Default" "Getting Data Drive (D:) Volume Name" ""
+            $dataDrive = InvCmd {Get-WmiObject win32_logicaldisk} | Where-Object {($_.DeviceID -eq 'D:')-and($_.DriveType -eq 3)}
+            if (!$dataDrive) {
+                WriteResults "Fail" "- NO data volume with drive letter D: found" "" $ShwResMsg
+            } 
+            else {
+                if ($dataDrive.VolumeName -eq $null -or $dataDrive.VolumeName -eq "") {
+                    WriteResults "Warning" "- No name for data volume with drive letter D: found" "" "Warning" $ShwResMsg
                 }
                 else {
-                    WriteResults "Red" "- Binding Order NOT correctly configured - $($BindingOrder[1]) above $($BindingOrder[0])" "" "Fail"
-                    WriteResults "Red" "- - the Public NIC should be listed above the Private NIC in the Binding Order" "" "Fail"
+                    WriteResults "Pass" "- Volume '$($dataDrive.VolumeName)' with drive letter D: found" "" $ShwResMsg
+                }
+            }
+        } #>
+
+
+        #Getting non-loopback nics for following NIC checks
+        $Nics = InvCmd {Get-NetIPInterface} | Where-Object {($_.InterfaceAlias -notlike 'Loopback*')-and($_.InterfaceAlias -notlike 'isatap*')}
+        #Check if IPv6 is Disabled on all NIC's if not disabled globally
+        if (!$Ipv6DisReg) {
+            $Ipv6Nics = $Nics | Where-Object {$_.AddressFamily -eq 23}
+            WriteResults "Default" "Checking to see IPv6 is disabled on the NIC's" ""
+            if ($Ipv6Nics.count -eq 0) {
+                WriteResults "Pass" "- IPv6 is Disabled on all present NIC's" "" $ShwResMsg
+            }
+            else {
+                WriteResults "Fail" "- IPv6 is enabled on the followng NIC's" "" $ShwResMsg
+                foreach ($Ipv6Nic in $Ipv6Nics){
+                    WriteResults "Fail" "- - $($Ipv6Nic.InterfaceAlias)" ""
+                }
+            }
+        }
+
+        #Check for proper number of Public NIC's
+        WriteResults "Default" "Checking for the proper number of interfaces named 'Public'" ""
+        $Ipv4Nics = $Nics | Where-Object -FilterScript {$_.AddressFamily -eq 2}
+        $PubNic = $Ipv4Nics | Where-Object {$_.InterfaceAlias -like '*public*'}
+        $PrivNic = $Ipv4Nics | Where-Object {$_.InterfaceAlias -like '*private*'}
+        if ($PubNic){
+            if (!$PubNic.count) {
+                WriteResults "Pass" "- One interface named `'Public`' found" "" $ShwResMsg
+            }
+            else {
+                WriteResults "Fail" "- $($PubNic.count) interfaces named `'Public`' found" "" $ShwResMsg
+                $PubNicErr = $true
+            }
+        }
+        else {
+            WriteResults "Fail" "- No interface named `'Public`' found" "" $ShwResMsg
+            $PubNicErr = $true
+        }    
+
+        if($Router -or $Logger -or $Pg){
+            WriteResults "Default" "Checking for the proper number of interfaces named 'Private'" ""
+            if ($PrivNic){
+                if (!$PrivNic.count) {
+                    WriteResults "Pass" "- One interface named `'Private`' found" "" $ShwResMsg
+                }
+                else {
+                    WriteResults "Fail" "- $($PrivNic.count) interfaces named `'Private`' found" "" $ShwResMsg
+                    $PrivNicErr = $true
+                }
+            }
+            else {
+                WriteResults "Fail" "- No interface named `'Private`' found" "" $ShwResMsg
+                $PrivNicErr = $true
+            }    
+        }
+
+        #Check for proper number of IP Addresses for Public NIC
+        WriteResults "Default" "Checking for proper number of IP Addresses for Public NIC" ""
+        if(!$PubNicErr){
+            $PubNicIps = InvCmd {Get-NetIPAddress} | Where-Object {$_.InterfaceAlias -eq $PubNic.InterfaceAlias}
+            if ($Router -or $Pg) {
+                WriteResults "Default" "- Server has PG or Router present and should have 2 Public IP addresses" ""
+                if ($PubNicIps.count -eq 2) {
+                    WriteResults "Pass" "- - Found 2 IP addresses assigned to the Public Interface" "" $ShwResMsg
+                    WriteResults "Pass" "- - $($PubNicIps.IPAddress)" ""
+                }
+                else {
+                    if (!$PubNicIps.count) {
+                        WriteResults "Fail" "- - Found only 1 IP addresses assigned to the Public Interface" "" $ShwResMsg
+                        WriteResults "Fail" "- - $($PubNicIps.IPAddress)" ""
+                    }
+                    else {
+                        WriteResults "Fail" "- - Found more than 2 IP addresses assigned to the Public Interface" "" $ShwResMsg
+                        WriteResults "Fail" "- - $($PubNicIps.IPAddress)" ""
+                    }
+                    
+                }
+            }
+            else {
+                WriteResults "Default" "- Server has does not have PG or Router present and should have 1 Public IP addresses" ""
+                if (!$PubNicIps.count) {
+                    WriteResults "Pass" "- - Found 1 IP addresses assigned to the Public Interface" "" $ShwResMsg
+                    WriteResults "Pass" "- - $($PubNicIps.IPAddress)" ""
+                }
+                else {
+                    WriteResults "Fail" "- - Found more than 1 IP addresses assigned to the Public Interface" "" $ShwResMsg
+                    WriteResults "Fail" "- - $($PubNicIps.IPAddress)" ""
+                }
+            }
+        }
+        else {
+            WriteResults "Fail" "- Public NIC count or Public NIC naming not configured correctly." "" $ShwResMsg
+            WriteResults "Fail" "- Cannot check for proper number of IP Addresse" ""
+        }
+
+        #Check for proper number of IP Addresses for Private NIC
+        if ($Router -or $Logger -or $Pg -or $Cg) {
+            WriteResults "Default" "Checking for proper number of IP Addresses for Private NIC" ""
+            if(!$PrivNicErr){
+                $PrivNicIps = InvCmd {Get-NetIPAddress} | Where-Object {$_.InterfaceAlias -eq $PrivNic.InterfaceAlias}
+                if ($Router -or $Pg) {
+                    WriteResults "Default" "- Server has PG or Router present and should have 2 Private IP addresses" ""
+                    if ($PrivNicIps.count -eq 2) {
+                        WriteResults "Pass" "- - Found 2 IP addresses assigned to the Private Interface" "" $ShwResMsg
+                        WriteResults "Pass" "- - $($PrivNicIps.IPAddress)" ""
+                    }
+                    else {
+                        if (!$PrivNicIps.count) {
+                            WriteResults "Fail" "- - Found only 1 IP addresses assigned to the Private Interface" "" $ShwResMsg
+                            WriteResults "Fail" "- - $($PrivNicIps.IPAddress)" ""
+                        }
+                        else {
+                            WriteResults "Fail" "- - Found more than 2 IP addresses assigned to the Private Interface" "" $ShwResMsg
+                            WriteResults "Fail" "- - $($PrivNicIps.IPAddress)" ""
+                        }
+                        
+                    }
+                }
+                else {
+                    WriteResults "Default" "- Server has does not have PG or Router present and should have 1 Private IP addresses" ""
+                    if (!$PrivNicIps.count) {
+                        WriteResults "Pass" "- - Found 1 IP addresses assigned to the Private Interface" "" $ShwResMsg
+                        WriteResults "Pass" "- - $($PrivNicIps.IPAddress)" ""
+                    }
+                    else {
+                        WriteResults "Fail" "- - Found more than 1 IP addresses assigned to the Private Interface" "" $ShwResMsg
+                        WriteResults "Fail" "- - $($PrivNicIps.IPAddress)" ""
+                    }
+                }
+            }
+            else {
+                WriteResults "Fail" "- Private NIC count or Private NIC naming not configured correctly." "" $ShwResMsg
+                WriteResults "Fail" "- Cannot check for proper number of IP Addresse" ""
+            }
+        }
+        else {
+            #server does not have component that reqires private NIC
+        }
+
+        #lsits static routes for Private NIC
+        if($Router -or $Logger -or $Pg -or $Cg){
+            WriteResults "Default" "Checking to see Persistent Static Route for Prive NIC is present" ""
+            try {$PrivRoute = InvCmd {Get-NetRoute} | Where-Object {($_.InterfaceAlias -eq $PrivNic.InterfaceAlias) -and ($_.Protocol -eq 'NetMgmt')} -ErrorAction Stop}
+            catch{$PrivRoute = "error"}
+        }
+        #try {$PrivRoute = Get-NetRoute -InterfaceAlias $PrivNic.InterfaceAlias -Protocol NetMgmt -ErrorAction Stop}
+        #catch {$PrivRoute = "error"}
+        #$PrivNic.InterfaceAlias
+
+        #Check NIC/Interface Priority for Router, Logger and PG servers
+        if($Router -or $Logger -or $Pg -or $Cg){
+            WriteResults "Default" "Checking to see if NIC Binding Order/Interface Metric is configured properly" ""
+            if ($PubNicErr -or $PrivNicErr) {
+                WriteResults "Fail" "- NIC count or NIC naming not configured correctly." "" $ShwResMsg
+                WriteResults "Fail" "- Cannot check for Binding Order or Interface Metric" ""
+            }
+            else {
+                #2016 NIC Metric Check
+                if ($OS -like "*2016*"){
+                    WriteResults "Default" "- Server 2016 Found Checking Interface Metric" ""
+                    if ($PubNic.InterfaceMetric -lt $PrivNic.InterfaceMetric){
+                        WriteResults "Pass" "- NIC Metric Priority correctly configured Public - NIC = $($PubNic.InterfaceMetric) and Private NIC = $($PrivNic.InterfaceMetric)" "" $ShwResMsg
+                    }
+                    
+        
+                    else{
+                    WriteResults "Fail" "- NIC Metric Priority NOT correctly configured - Public NIC = $($PubNic.InterfaceMetric) and Private NIC = $($PrivNic.InterfaceMetric)" "" $ShwResMsg
+                        WriteResults "Fail" "- - Public NIC should have a lower Metric value than the Priate NIC" ""
+                    }
+                }
+
+                #2012 R2 Binding Order Check
+                else{
+                    WriteResults "Default" "- Server 2012 Found Checking Binding Order" ""
+                    $Binding = InvCmd {Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Linkage"} | Select-Object -expand Bind
+                    $BindingOrder = @()
+                    ForEach ($Bind in $Binding)
+                    {
+                        $DeviceId = $Bind.Split("\")[2]
+                        $Adapter = InvCmd {Get-WmiObject Win32_Networkadapter} | Where-Object {$_.GUID -like "$DeviceId" } | Select-Object -expand NetConnectionId
+                        if (($Adapter -like '*public*')-or($Adapter -like '*private*')){
+                            $BindingOrder += $Adapter
+                        }
+                    }
+                    if (($BindingOrder[0] -like '*public*')-and($BindingOrder[1] -like '*private*')){
+                        WriteResults "Pass" "- Binding Order correctly configured - $($BindingOrder[0]) above $($BindingOrder[1])" "" $ShwResMsg
+                    }
+                    else {
+                        WriteResults "Fail" "- Binding Order NOT correctly configured - $($BindingOrder[1]) above $($BindingOrder[0])" "" $ShwResMsg
+                        WriteResults "Fail" "- - the Public NIC should be listed above the Private NIC in the Binding Order" ""
+                    }
                 }
             }
         }
         else{
-            WriteResults "Green" "- Server only requires 1 NIC, not checking binding order" "" "Pass"
+            WriteResults "Pass" "- Server only requires 1 NIC, not checking binding order" "" $ShwResMsg
         }
     }
 
     #If Server not Reachable NOT continuing with Audit Checks
     Else{
-        WriteResults "Red" "- Server `'$Server`' is not reachable - Ensure server is online and attempt to audit again." "" "Fail"
+        WriteResults "Fail" "- Server `'$Server`' is not reachable - Ensure server is online and attempt to audit again." "" $ShwResMsg
     }
 }
 #endregion
