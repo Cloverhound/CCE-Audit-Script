@@ -250,8 +250,6 @@ Get-Content $InputServerList | ForEach-Object {
     WriteResults "Default" "Checking to see if `'$Server`' is online" ""
     if (Test-Connection -Count 2 -Quiet $Server){
         WriteResults "Pass" "- Server `'$Server`' Online - Continuing with health chek items" "" $ShwResMsg
-        
-
 
         #Get OS version
         WriteResults "Default" "Getting OS version" ""
@@ -436,27 +434,7 @@ Get-Content $InputServerList | ForEach-Object {
         }
         else{
             WriteResults "Fail" "- NO Windows Updates have been installed in the last 60 days" "" $ShwResMsg
-        }
-
-        #Check if IPv6 is globally disabled
-        WriteResults "Default" "Checking if IPv6 is globally disabled in the registry" ""
-        try {$Ipv6RegData = InvCmd {Get-ItemProperty -PSPath 'HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\'} | Select-Object -ExpandProperty DisabledComponents -ErrorAction Stop}
-        catch {$Ipv6RegData=$null}
-        if ($Ipv6RegData -eq 255){
-            WriteResults "Pass" "- IPv6 has been globally disabled in the registry" "" $ShwResMsg
-            $Ipv6DisReg = $true
-        }
-        elseif ($Ipv6RegData -eq -1){
-            WriteResults "Warning" "- IPv6 has been globally disabled in the registry" "" $ShwResMsg
-            WriteResults "Warning" "- The following registry value should be set to 0x000000ff not 0xffffffff" ""
-            WriteResults "Warning" "- HKLM:SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\DisabledComponents" ""
-            WriteResults "Warning" "- Using 0xffffffff will cause the server to take longer to boot up during restarts" ""
-            $Ipv6DisReg = $true
-        }
-        else{
-            WriteResults "Warning" "- IPv6 NOT globally disabled in the registry, must check that it's disabled on NIC's" "" $ShwResMsg
-            $Ipv6DisReg = $false
-        }
+        } 
         
         #Check that TCP offload is Disabled and NIC speed is set to 1Gb Full Duplex
         WriteResults "Default" "Check to see if TCP Offload and Speed/Duplex setting are configured properly" ""
@@ -501,7 +479,7 @@ Get-Content $InputServerList | ForEach-Object {
             WriteResults "Fail" "- Unable to find Portico Service Ensure that servername in list is correct" "" $ShwResMsg
             WriteResults "Fail" "- - ICM must be installed on the server to be audited, only a limited audit will be run" ""
             $IcmInstalled = $false
-        } 
+        }
 
         #Get ICM Instance(s)
         WriteResults "Default" "Fetching ICM Inatance(s)"
@@ -509,12 +487,28 @@ Get-Content $InputServerList | ForEach-Object {
         $InstancesFound = $IcmRegKeys | Where-Object {($_ -notmatch '\d\d\.\d')-and($_ -notin 'ActiveInstance','Performance','Serviceability','SNMP','SystemSettings','CertMon','Cisco SSL Configuration')}
         If ($InstancesFound.Count -gt 0){
             ForEach ($Instance in $InstancesFound){
-                WriteResults "Pass" "- Instance $($Instance) Found" "" $ShwResMsg
+                $InstNum = Invoke-Command -ComputerName $Server -Credential $CredsWin -ArgumentList $Instance {
+                    param($Instance)
+                    Get-ItemProperty -PSPath "HKLM:\SOFTWARE\Cisco Systems, Inc.\ICM\$Instance\CurrentVersion\" | Select-Object -ExpandProperty InstanceNumber}
+                WriteResults "Pass" "- Found Instance`:$Instance Instance Number`:$InstNum" "" $ShwResMsg
             }   
         }
         else{
             WriteResults "Fail" "No Instance Found" "" $ShwResMsg
         }
+
+        #Get ICM Install Path
+        WriteResults "Default" "Getting Installed Cisco Products"
+        $IcmPath = InvCmd {Get-ItemProperty -PSPath "HKLM:\SOFTWARE\Cisco Systems, Inc.\ICM\SystemSettings\" | Select-Object -ExpandProperty InstallPath}
+        WriteResults "Pass" "- ICM is installed in `'$IcmPath`'" ""
+
+        #Get Installed Cisco Products
+        WriteResults "Default" "Getting Installed Cisco Products"
+        $InstalledCiscoProds = InvCmd {Get-ItemProperty "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" | Where-Object {$_.Publisher -like "*cisco*"}}
+        foreach ($InstalledCiscoProd in $InstalledCiscoProds){
+            WriteResults "Pass" "- Application`:$($InstalledCiscoProd.DisplayName) - Version`:$($InstalledCiscoProd.DisplayVersion) - Publisher`:$($InstalledCiscoProd.Publisher) - Install Date`:$($InstalledCiscoProd.InstallDate)" ""
+        }
+        
 
         #Get ICM Version
         WriteResults "Default" "Fetching ICM Version(s)"
@@ -661,22 +655,24 @@ Get-Content $InputServerList | ForEach-Object {
             }
         }
 
-
-        #Getting non-loopback nics for following NIC checks
-        $Nics = InvCmd {Get-NetIPInterface} | Where-Object {($_.InterfaceAlias -notlike 'Loopback*')-and($_.InterfaceAlias -notlike 'isatap*')}
-        #Check if IPv6 is Disabled on all NIC's if not disabled globally
-        if (!$Ipv6DisReg) {
-            $Ipv6Nics = $Nics | Where-Object {$_.AddressFamily -eq 23}
-            WriteResults "Default" "Checking to see IPv6 is disabled on the NIC's" ""
-            if ($Ipv6Nics.count -eq 0) {
-                WriteResults "Pass" "- IPv6 is Disabled on all present NIC's" "" $ShwResMsg
-            }
-            else {
-                WriteResults "Fail" "- IPv6 is enabled on the followng NIC's" "" $ShwResMsg
-                foreach ($Ipv6Nic in $Ipv6Nics){
-                    WriteResults "Fail" "- - $($Ipv6Nic.InterfaceAlias)" ""
-                }
-            }
+        #Check if IPv6 is globally disabled
+        WriteResults "Default" "Checking if IPv6 is globally disabled in the registry" ""
+        try {$Ipv6RegData = InvCmd {Get-ItemProperty -PSPath 'HKLM:\SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\'} | Select-Object -ExpandProperty DisabledComponents -ErrorAction Stop}
+        catch {$Ipv6RegData=$null}
+        if ($Ipv6RegData -eq 255){
+            WriteResults "Pass" "- IPv6 has been globally disabled in the registry" "" $ShwResMsg
+            $Ipv6DisReg = $true
+        }
+        elseif ($Ipv6RegData -eq -1){
+            WriteResults "Warning" "- IPv6 has been globally disabled in the registry" "" $ShwResMsg
+            WriteResults "Warning" "- The following registry value should be set to 0x000000ff not 0xffffffff" ""
+            WriteResults "Warning" "- HKLM:SYSTEM\CurrentControlSet\Services\TCPIP6\Parameters\DisabledComponents" ""
+            WriteResults "Warning" "- Using 0xffffffff will cause the server to take longer to boot up during restarts" ""
+            $Ipv6DisReg = $true
+        }
+        else{
+            WriteResults "Warning" "- IPv6 NOT globally disabled in the registry, must check that it's disabled on NIC's" "" $ShwResMsg
+            $Ipv6DisReg = $false
         }
 
         #Check for proper number of Public NIC's
@@ -698,7 +694,7 @@ Get-Content $InputServerList | ForEach-Object {
             $PubNicErr = $true
         }    
 
-        if($Router -or $Logger -or $Pg){
+        if($Router -or $Logger -or $Pg -or $Cg){
             WriteResults "Default" "Checking for the proper number of interfaces named 'Private'" ""
             if ($PrivNic){
                 if (!$PrivNic.count) {
@@ -715,10 +711,36 @@ Get-Content $InputServerList | ForEach-Object {
             }    
         }
 
-        #Check for proper number of IP Addresses for Public NIC
-        WriteResults "Default" "Checking for proper number of IP Addresses for Public NIC" ""
-        if(!$PubNicErr){
-            $PubNicIps = InvCmd {Get-NetIPAddress} | Where-Object {$_.InterfaceAlias -eq $PubNic.InterfaceAlias}
+
+        #Getting Network Properties for following checks
+        if (!$PubNicErr -or !$PrivNicErr) {
+            $DnsClient = InvCmd {Get-DnsClient}
+            $NetIpConfig = InvCmd {Get-NetIPConfiguration}
+            $NetIpAdd = InvCmd {Get-NetIPAddress}
+            $NetBindings = InvCmd {Get-NetAdapterBinding}
+            $DnsSvrCnt = 1
+        }
+
+        #Verify that only one Public NIC exists
+        if (!$PubNicErr) {
+            #Check if IPv6 is Disabled on Public NIC
+            WriteResults "Default" "Checking to see if IPv6 is disabled on the Public NIC" ""
+            $PubIpv6En = $NetBindings | Where-Object {($_.Name -eq $PubNic.InterfaceAlias)-and($_.ComponentID -eq 'ms_tcpip6')} | Select-Object -ExpandProperty Enabled
+            if ($PubIpv6En -eq $false) {
+                WriteResults "Pass" "- TCP IP v6 disabled on 'Public' Interface" "" $ShwResMsg
+            }
+            else {
+                if ($Ipv6DisReg) {
+                    WriteResults "Warning" "- IPv6 is ENABLED on 'Public' Interface" "" $ShwResMsg
+                    WriteResults "Warning" "- however IPv6 is disabled globally in the registry" ""
+                }
+                else {
+                    WriteResults "Fail" "- TCP IP v6 ENABLED on 'Public' Interface and in the registry" "" $ShwResMsg
+                }
+            }
+            #Check for proper number of IP Addresses for Public NIC and show Subnet Mask
+            WriteResults "Default" "Checking for proper number of IP Addresses for Public NIC" ""
+            $PubNicIps = $NetIpAdd | Where-Object {$_.InterfaceAlias -eq $PubNic.InterfaceAlias}
             if ($Router -or $Pg) {
                 WriteResults "Default" "- Server has PG or Router present and should have 2 Public IP addresses" ""
                 if ($PubNicIps.count -eq 2) {
@@ -754,17 +776,81 @@ Get-Content $InputServerList | ForEach-Object {
                     }
                 }
             }
+
+            #Check for Default Gateway for Public NIC and NO Default gateway on Private (if applicable)
+            WriteResults "Default" "Checking for Default Gateway for Public NIC" ""
+            $PubDefGw = $NetIpConfig | Where-Object {$_.InterfaceAlias -eq $PubNic.InterfaceAlias} | Select-Object -ExpandProperty IPv4DefaultGateway
+            if ($PubDefGw) {
+                WriteResults "Pass" "- Default Gateway for Public Network" "" $ShwResMsg
+                WriteResults "Pass" "- - NIC:`'$($PubDefGw.InterfaceAlias)`' Default Gateway:$($PubDefGw.NextHop)" ""
+            }
+            else {
+                WriteResults "Fail" "- NO Default Gateway Configured for Public Network" "" $ShwResMsg
+            }
+
+            #Check to see if Public NIC has DNS Servers configured
+            WriteResults "Default" "Checking to see if Public NIC has DNS Servers configured" ""
+            $PubDnsSvrs = $NetIpConfig | Where-Object {$_.InterfaceAlias -eq $PubNic.InterfaceAlias} | Select-Object -ExpandProperty DNSServer | Where-Object {$_.AddressFamily -eq 2} | Select-Object -ExpandProperty ServerAddresses
+            if ($PubDnsSvrs) {
+                WriteResults "Pass" "- The following DNS servers have been configured" "" $ShwResMsg
+                foreach ($PubDnsSvr in $PubDnsSvrs){
+                    WriteResults "Pass" "- - DNS Server $DnsSvrCnt`: $PubDnsSvr" ""
+                    $DnsSvrCnt++
+                }
+            }
+            else {
+                WriteResults "Fail" "- DNS Servers NOT found for Public NIC" "" $ShwResMsg
+            }
+
+            #Check to see if Public NIC is configured to register with DNS
+            WriteResults "Default" "Checking to see if Public NIC is configured to register with DNS" ""
+            $PubDnsReg = $DnsClient | Where-Object {$_.InterfaceAlias -eq $PubNic.InterfaceAlias} | Select-Object -ExpandProperty RegisterThisConnectionsAddress
+            if ($PubDnsReg -eq 'True') {
+                WriteResults "Pass" "- The Public interface is configured to register with DNS" "" $ShwResMsg
+            }
+            else {
+                WriteResults "Fail" "- The Public interface is NOT configured to register with DNS" "" $ShwResMsg
+            }
+
+            #Check to see if Public NIC is configured with DNS Suffix
+            WriteResults "Default" "Checking to see if Public NIC is configured with DNS Suffix" ""
+            $PubDnsSuf = $DnsClient | Where-Object {$_.InterfaceAlias -eq $PubNic.InterfaceAlias} | Select-Object -ExpandProperty ConnectionSpecificSuffix
+            if ($PubDnsSuf) {
+                WriteResults "Pass" "- The Public interface is configured with DNS Suffix" "" $ShwResMsg
+                WriteResults "Pass" "- DNS Suffix`: $PubDnsSuf" ""
+            }
+            else {
+                WriteResults "Fail" "- The Public interface is NOT configured with DNS Suffix" "" $ShwResMsg
+            }
         }
         else {
             WriteResults "Fail" "- Public NIC count or Public NIC naming not configured correctly." "" $ShwResMsg
-            WriteResults "Fail" "- Cannot check for proper number of IP Addresse" ""
+            WriteResults "Fail" "- Cannot check for Public NIC configurations" ""
         }
 
-        #Check for proper number of IP Addresses for Private NIC
-        if ($Router -or $Logger -or $Pg -or $Cg) {
-            WriteResults "Default" "Checking for proper number of IP Addresses for Private NIC" ""
+        #Check IP Settings for Private NIC on applicable 
+        if($Router -or $Logger -or $Pg -or $Cg){
+            #Verify that there's only One NIC Named Private
             if(!$PrivNicErr){
-                $PrivNicIps = InvCmd {Get-NetIPAddress} | Where-Object {$_.InterfaceAlias -eq $PrivNic.InterfaceAlias}
+                #Check if IPv6 is Disabled on Private NIC
+                WriteResults "Default" "Checking to see if IPv6 is disabled on the Private NIC" ""
+                $PrivIpv6En = $NetBindings | Where-Object {($_.Name -eq $PrivNic.InterfaceAlias)-and($_.ComponentID -eq 'ms_tcpip6')} | Select-Object -ExpandProperty Enabled
+                if (!$PrivIpv6En) {
+                    WriteResults "Pass" "- TCP IP v6 disabled on 'Private' Interface" "" $ShwResMsg
+                }
+                else {
+                    if ($Ipv6DisReg) {
+                        WriteResults "Warning" "- IPv6 is ENABLED on 'Private' Interface" "" $ShwResMsg
+                        WriteResults "Warning" "- however IPv6 is disabled globally in the registry" ""
+                    }
+                    else {
+                        WriteResults "Fail" "- TCP IP v6 ENABLED on 'Private' Interface and in the registry" "" $ShwResMsg
+                    }
+                }
+
+                #Check for proper number of IP Addresses for Private NIC
+                WriteResults "Default" "Checking for proper number of IP Addresses for Private NIC" ""
+                $PrivNicIps = $NetIpAdd | Where-Object {$_.InterfaceAlias -eq $PrivNic.InterfaceAlias}
                 if ($Router -or $Pg) {
                     WriteResults "Default" "- Server has PG or Router present and should have 2 Private IP addresses" ""
                     if ($PrivNicIps.count -eq 2) {
@@ -784,7 +870,6 @@ Get-Content $InputServerList | ForEach-Object {
                                 WriteResults "Pass" "- - IP:$($PrivNicIp.IPAddress)/$($PrivNicIp.PrefixLength)" ""
                             }
                         }
-                        
                     }
                 }
                 else {
@@ -800,37 +885,40 @@ Get-Content $InputServerList | ForEach-Object {
                         }
                     }
                 }
-            }
-            else {
-                WriteResults "Fail" "- Private NIC count or Private NIC naming not configured correctly." "" $ShwResMsg
-                WriteResults "Fail" "- Cannot check for proper number of IP Addresse" ""
-            }
-        }
-        else {
-            #server does not have component that reqires private NIC
-        }
 
-        #Check for Default Gateway for Public NIC
-        WriteResults "Default" "Checking to see Persistent Static Route for Prive NIC is present" ""
-        if (!$PubNicErr) {
-            $PubRoutes = InvCmd {Get-NetRoute} | Where-Object {($_.InterfaceAlias -eq $PubNic.InterfaceAlias) -and ($_.Protocol -eq 'NetMgmt')}
-            if (($PubRoutes)-and(!$PubRoutes.count)) {
-                WriteResults "Pass" "- Default Gateway for Public Network" "" $ShwResMsg
-                WriteResults "Pass" "- - NIC:`'$($PubRoutes.InterfaceAlias)`' Default Gateway:$($PubRoutes.NextHop)" ""
-            }
-            else {
-                WriteResults "Fail" "- NO Default Gateway Configured for Public Network" "" $ShwResMsg
-            }
-        }
-        else {
-            WriteResults "Fail" "- Public NIC count or Public NIC naming not configured correctly." "" $ShwResMsg
-            WriteResults "Fail" "- Cannot check for Default Gateway" ""
-        }
+                #Check to see if 'Client for MS Networks' is disabled on Private NIC
+                WriteResults "Default" "Check to see if 'Client for MS Networks' is disabled on Private NIC" ""
+                $PrivMsCliBind = $NetBindings | Where-Object {($_.Name -eq $PrivNic.InterfaceAlias)-and($_.ComponentID -eq 'ms_msclient')} | Select-Object -ExpandProperty Enabled
+                if (!$PrivMsCliBind) {
+                    WriteResults "Pass" "- 'Client for MS Networks' is disabled on Private NIC" "" $ShwResMsg
+                }
+                else {
+                    WriteResults "Fail" "- 'Client for MS Networks' is ENABLED on Private NIC" "" $ShwResMsg
+                }
 
-        #Check for Static Route entry for Private NIC
-        if($Router -or $Logger -or $Pg -or $Cg){
-            WriteResults "Default" "Checking to see Persistent Static Route for Prive NIC is present" ""
-            if(!$PrivNicErr){
+                #Check to see if 'File and Printer Sharing for MS Networks' is disabled on Private NIC
+                WriteResults "Default" "Check to see if 'File and Printer Sharing for MS Networks' is disabled on Private NIC" ""
+                $PrivMsSrvBind = $NetBindings | Where-Object {($_.Name -eq $PrivNic.InterfaceAlias)-and($_.ComponentID -eq 'ms_server')} | Select-Object -ExpandProperty Enabled
+                if (!$PrivMsSrvBind) {
+                    WriteResults "Pass" "- 'File and Printer Sharing for MS Networks' is disabled on Private NIC" "" $ShwResMsg
+                }
+                else {
+                    WriteResults "Fail" "- 'File and Printer Sharing for MS Networks' is ENABLED on Private NIC" "" $ShwResMsg
+                }
+
+                #Check for NO Default Gateway on Private NIC
+                WriteResults "Default" "Checking for NO Default Gateway on Private NIC" ""
+                $PrivDefGw = $NetIpConfig | Where-Object {$_.InterfaceAlias -eq $PrivNic.InterfaceAlias} | Select-Object -ExpandProperty IPv4DefaultGateway
+                if (!$PrivDefGw) {
+                    WriteResults "Pass" "- No Default Gateway found for Private Network" "" $ShwResMsg
+                }
+                else {
+                    WriteResults "Fail" "- Foun a Default Gateway on Private NIC, this should NOT be configured" "" $ShwResMsg
+                    WriteResults "Fail" "- - NIC:`'$($PrivDefGw.InterfaceAlias)`' Default Gateway:$($PrivDefGw.NextHop)" ""
+                }
+
+                #Check for Static Route entry for Private NIC
+                WriteResults "Default" "Checking to see Persistent Static Route for Prive NIC is present" ""
                 $PrivRoutes = InvCmd {Get-NetRoute} | Where-Object {($_.InterfaceAlias -eq $PrivNic.InterfaceAlias) -and ($_.Protocol -eq 'NetMgmt')}
                 if (($PrivRoutes)-and(!$PrivRoutes.count)) {
                     WriteResults "Pass" "- One Static Route found for Private Network" "" $ShwResMsg
@@ -847,11 +935,61 @@ Get-Content $InputServerList | ForEach-Object {
                         }
                     }
                 }
+
+                #Check to see if Private NIC has DNS Servers configured
+                $DnsSvrCnt=1
+                WriteResults "Default" "Checking to see if Private NIC has DNS Servers configured" ""
+                $PrivDnsSvrs = $NetIpConfig | Where-Object {$_.InterfaceAlias -eq $PrivNic.InterfaceAlias} | Select-Object -ExpandProperty DNSServer | Where-Object {$_.AddressFamily -eq 2} | Select-Object -ExpandProperty ServerAddresses
+                if ($PrivDnsSvrs) {
+                    WriteResults "Fail" "- The following DNS servers have been configured" "" $ShwResMsg
+                    foreach ($PrivDnsSvr in $PrivDnsSvrs){
+                        WriteResults "Fail" "- - DNS Server $DnsSvrCnt`: $PrivDnsSvr" ""
+                        $DnsSvrCnt++
+                    }
+                }
+                else {
+                    WriteResults "Pass" "- DNS Servers not found for Private NIC" "" $ShwResMsg
+                }
+
+                #Check to see if Private NIC is configured to register with DNS
+                WriteResults "Default" "Checking to see if Private NIC is configured to register with DNS" ""
+                $PrivDnsReg = $DnsClient | Where-Object {$_.InterfaceAlias -eq $PrivNic.InterfaceAlias} | Select-Object -ExpandProperty RegisterThisConnectionsAddress
+                if ($PrivDnsReg -eq 'True') {
+                    WriteResults "Fail" "- The Private interface IS configured to register with DNS" "" $ShwResMsg
+                }
+                else {
+                    WriteResults "Pass" "- The Private interface is not configured to register with DNS" "" $ShwResMsg
+                }
+
+                #Check to see if Private NIC is configured with DNS Suffix
+                WriteResults "Default" "Checking to see if Private NIC is configured with DNS Suffix" ""
+                $PrivDnsSuf = $DnsClient | Where-Object {$_.InterfaceAlias -eq $PrivNic.InterfaceAlias} | Select-Object -ExpandProperty ConnectionSpecificSuffix
+                if ($PrivDnsSuf) {
+                    WriteResults "Fail" "- The Private interface IS configured with DNS Suffix" "" $ShwResMsg
+                    WriteResults "Fail" "- DNS Suffix`: $PrivDnsSuf" ""
+                }
+                else {
+                    WriteResults "Pass" "- The Private interface is not configured with DNS Suffix" "" $ShwResMsg
+                }
+
+                #Check to see if 'Unidentified network' is set as a 'Private' network
+                WriteResults "Default" "Checking to see if 'Unidentified network' is set as a 'Private' network" ""
+                $PrivNetProf = InvCmd {Get-NetConnectionProfile} | Where-Object {$_.Name -eq 'Unidentified network'} | Select-Object -ExpandProperty NetworkCategory
+                if ($PrivNetProf -eq 'Private') {
+                    WriteResults "Pass" "- The 'Unidentified network' is set as a 'Private' network" "" $ShwResMsg
+                }
+                else {
+                    WriteResults "Fail" "- The 'Unidentified network' is NOT set as a 'Private' network" "" $ShwResMsg
+                    WriteResults "Fail" "- It is set to use the $PrivNetProf profile" "" $ShwResMsg
+                }
             }
             else {
                 WriteResults "Fail" "- Private NIC count or Private NIC naming not configured correctly." "" $ShwResMsg
-                WriteResults "Fail" "- Cannot check for Persistent Static Route for Private Network" ""
+                WriteResults "Fail" "- Cannot check Private NIC configurations" ""
             }
+        }
+        else {
+            #No components installed that reqire a Private interface
         }
 
         #Check NIC/Interface Priority for Router, Logger and PG servers
