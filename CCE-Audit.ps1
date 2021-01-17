@@ -26,7 +26,9 @@ $global:HTMLOuputEnd = "</body></html>"
 while ($SqlCredType -notin "Y","N"){
     Write-Host "Enter " -NoNewline; Write-Host -ForegroundColor Yellow "Y" -NoNewline; Write-Host " to use Integrated authentication for SQL, or enter " -NoNewline
     Write-Host -ForegroundColor Yellow "N" -NoNewline; Write-Host " to use SQL authentication"
-    $SqlCredType = Read-Host
+    #$SqlCredType = Read-Host
+    #testing with auto setting sql auth
+    $SqlCredType = 'n'
     if ($SqlCredType -in "Y","N"){
         if ($SqlCredType -eq "Y"){
             $integratedSqlLogin=$true
@@ -249,7 +251,7 @@ Get-Content $InputServerList | ForEach-Object {
     if (Test-Connection -Count 2 -Quiet $Server){
         WriteResults "Pass" "- Server `'$Server`' Online - Continuing with health chek items" "" $ShwResMsg
         
-        
+        <#
 
         #Get OS version
         WriteResults "Default" "Getting OS version" ""
@@ -477,7 +479,7 @@ Get-Content $InputServerList | ForEach-Object {
             }
         }
 
-    #endregion
+    #endregion #>
         
         #region Get ICM info
         #Check that Portico is installed and running
@@ -597,7 +599,7 @@ Get-Content $InputServerList | ForEach-Object {
         $AwDb
         $HdsDb#>
         #endregion Get ICM info
-
+<#
         #Get Cisco ICM Services and Startup Type
         WriteResults "Default" "Checking to see what ICM services are installed and their Startup Type" ""
         InvCmd {Get-WmiObject -Query "select * from win32_service where DisplayName like 'Cisco%'"}  | ForEach-Object {
@@ -721,16 +723,20 @@ Get-Content $InputServerList | ForEach-Object {
                 WriteResults "Default" "- Server has PG or Router present and should have 2 Public IP addresses" ""
                 if ($PubNicIps.count -eq 2) {
                     WriteResults "Pass" "- - Found 2 IP addresses assigned to the Public Interface" "" $ShwResMsg
-                    WriteResults "Pass" "- - $($PubNicIps.IPAddress)" ""
+                    foreach ($PubNicIp in $PubNicIps){
+                        WriteResults "Pass" "- - IP:$($PubNicIp.IPAddress)/$($PubNicIp.PrefixLength)" ""
+                    }
                 }
                 else {
                     if (!$PubNicIps.count) {
                         WriteResults "Fail" "- - Found only 1 IP addresses assigned to the Public Interface" "" $ShwResMsg
-                        WriteResults "Fail" "- - $($PubNicIps.IPAddress)" ""
+                        WriteResults "Fail" "- - IP:$($PubNicIp.IPAddress)/$($PubNicIp.PrefixLength)" ""
                     }
                     else {
                         WriteResults "Fail" "- - Found more than 2 IP addresses assigned to the Public Interface" "" $ShwResMsg
-                        WriteResults "Fail" "- - $($PubNicIps.IPAddress)" ""
+                        foreach ($PubNicIp in $PubNicIps){
+                            WriteResults "Pass" "- - IP:$($PubNicIp.IPAddress)/$($PubNicIp.PrefixLength)" ""
+                        }
                     }
                     
                 }
@@ -739,11 +745,13 @@ Get-Content $InputServerList | ForEach-Object {
                 WriteResults "Default" "- Server has does not have PG or Router present and should have 1 Public IP addresses" ""
                 if (!$PubNicIps.count) {
                     WriteResults "Pass" "- - Found 1 IP addresses assigned to the Public Interface" "" $ShwResMsg
-                    WriteResults "Pass" "- - $($PubNicIps.IPAddress)" ""
+                    WriteResults "Pass" "- - IP:$($PubNicIp.IPAddress)/$($PubNicIp.PrefixLength)" ""
                 }
                 else {
                     WriteResults "Fail" "- - Found more than 1 IP addresses assigned to the Public Interface" "" $ShwResMsg
-                    WriteResults "Fail" "- - $($PubNicIps.IPAddress)" ""
+                    foreach ($PubNicIp in $PubNicIps){
+                        WriteResults "Pass" "- - IP:$($PubNicIp.IPAddress)/$($PubNicIp.PrefixLength)" ""
+                    }
                 }
             }
         }
@@ -761,7 +769,9 @@ Get-Content $InputServerList | ForEach-Object {
                     WriteResults "Default" "- Server has PG or Router present and should have 2 Private IP addresses" ""
                     if ($PrivNicIps.count -eq 2) {
                         WriteResults "Pass" "- - Found 2 IP addresses assigned to the Private Interface" "" $ShwResMsg
-                        WriteResults "Pass" "- - $($PrivNicIps.IPAddress)" ""
+                        foreach ($PrivNicIp in $PrivNicIps){
+                            WriteResults "Pass" "- - IP:$($PrivNicIp.IPAddress)/$($PrivNicIp.PrefixLength)" ""
+                        }
                     }
                     else {
                         if (!$PrivNicIps.count) {
@@ -770,7 +780,9 @@ Get-Content $InputServerList | ForEach-Object {
                         }
                         else {
                             WriteResults "Fail" "- - Found more than 2 IP addresses assigned to the Private Interface" "" $ShwResMsg
-                            WriteResults "Fail" "- - $($PrivNicIps.IPAddress)" ""
+                            foreach ($PrivNicIp in $PrivNicIps){
+                                WriteResults "Pass" "- - IP:$($PrivNicIp.IPAddress)/$($PrivNicIp.PrefixLength)" ""
+                            }
                         }
                         
                     }
@@ -783,7 +795,9 @@ Get-Content $InputServerList | ForEach-Object {
                     }
                     else {
                         WriteResults "Fail" "- - Found more than 1 IP addresses assigned to the Private Interface" "" $ShwResMsg
-                        WriteResults "Fail" "- - $($PrivNicIps.IPAddress)" ""
+                        foreach ($PrivNicIp in $PrivNicIps){
+                            WriteResults "Pass" "- - IP:$($PrivNicIp.IPAddress)/$($PrivNicIp.PrefixLength)" ""
+                        }
                     }
                 }
             }
@@ -796,15 +810,49 @@ Get-Content $InputServerList | ForEach-Object {
             #server does not have component that reqires private NIC
         }
 
-        #lsits static routes for Private NIC
+        #Check for Default Gateway for Public NIC
+        WriteResults "Default" "Checking to see Persistent Static Route for Prive NIC is present" ""
+        if (!$PubNicErr) {
+            $PubRoutes = InvCmd {Get-NetRoute} | Where-Object {($_.InterfaceAlias -eq $PubNic.InterfaceAlias) -and ($_.Protocol -eq 'NetMgmt')}
+            if (($PubRoutes)-and(!$PubRoutes.count)) {
+                WriteResults "Pass" "- Default Gateway for Public Network" "" $ShwResMsg
+                WriteResults "Pass" "- - NIC:`'$($PubRoutes.InterfaceAlias)`' Default Gateway:$($PubRoutes.NextHop)" ""
+            }
+            else {
+                WriteResults "Fail" "- NO Default Gateway Configured for Public Network" "" $ShwResMsg
+            }
+        }
+        else {
+            WriteResults "Fail" "- Public NIC count or Public NIC naming not configured correctly." "" $ShwResMsg
+            WriteResults "Fail" "- Cannot check for Default Gateway" ""
+        }
+
+        #Check for Static Route entry for Private NIC
         if($Router -or $Logger -or $Pg -or $Cg){
             WriteResults "Default" "Checking to see Persistent Static Route for Prive NIC is present" ""
-            try {$PrivRoute = InvCmd {Get-NetRoute} | Where-Object {($_.InterfaceAlias -eq $PrivNic.InterfaceAlias) -and ($_.Protocol -eq 'NetMgmt')} -ErrorAction Stop}
-            catch{$PrivRoute = "error"}
+            if(!$PrivNicErr){
+                $PrivRoutes = InvCmd {Get-NetRoute} | Where-Object {($_.InterfaceAlias -eq $PrivNic.InterfaceAlias) -and ($_.Protocol -eq 'NetMgmt')}
+                if (($PrivRoutes)-and(!$PrivRoutes.count)) {
+                    WriteResults "Pass" "- One Static Route found for Private Network" "" $ShwResMsg
+                    WriteResults "Pass" "- - NIC:`'$($PrivRoutes.InterfaceAlias)`' Destination:$($PrivRoutes.DestinationPrefix) Next Hop:$($PrivRoutes.NextHop)" ""
+                }
+                else {
+                    if (!$PrivRoutes) {
+                        WriteResults "Fail" "- NO Route found for Private Network, expecting one" "" $ShwResMsg
+                    }
+                    else {
+                        WriteResults "Fail" "- Multiple Static Routes found for Private Network, expecting one" "" $ShwResMsg
+                        foreach ($PrivRoute in $PrivRoutes){
+                            WriteResults "Fail" "- - NIC:`'$($PrivRoute.InterfaceAlias)`' Destination:$($PrivRoute.DestinationPrefix) Next Hop:$($PrivRoute.NextHop)" "" 
+                        }
+                    }
+                }
+            }
+            else {
+                WriteResults "Fail" "- Private NIC count or Private NIC naming not configured correctly." "" $ShwResMsg
+                WriteResults "Fail" "- Cannot check for Persistent Static Route for Private Network" ""
+            }
         }
-        #try {$PrivRoute = Get-NetRoute -InterfaceAlias $PrivNic.InterfaceAlias -Protocol NetMgmt -ErrorAction Stop}
-        #catch {$PrivRoute = "error"}
-        #$PrivNic.InterfaceAlias
 
         #Check NIC/Interface Priority for Router, Logger and PG servers
         if($Router -or $Logger -or $Pg -or $Cg){
@@ -818,12 +866,12 @@ Get-Content $InputServerList | ForEach-Object {
                 if ($OS -like "*2016*"){
                     WriteResults "Default" "- Server 2016 Found Checking Interface Metric" ""
                     if ($PubNic.InterfaceMetric -lt $PrivNic.InterfaceMetric){
-                        WriteResults "Pass" "- NIC Metric Priority correctly configured Public - NIC = $($PubNic.InterfaceMetric) and Private NIC = $($PrivNic.InterfaceMetric)" "" $ShwResMsg
+                        WriteResults "Pass" "- NIC Metric Priority correctly configured - Public NIC:$($PubNic.InterfaceMetric) and Private NIC:$($PrivNic.InterfaceMetric)" "" $ShwResMsg
                     }
                     
         
                     else{
-                    WriteResults "Fail" "- NIC Metric Priority NOT correctly configured - Public NIC = $($PubNic.InterfaceMetric) and Private NIC = $($PrivNic.InterfaceMetric)" "" $ShwResMsg
+                    WriteResults "Fail" "- NIC Metric Priority NOT correctly configured - Public NIC:$($PubNic.InterfaceMetric) and Private NIC:$($PrivNic.InterfaceMetric)" "" $ShwResMsg
                         WriteResults "Fail" "- - Public NIC should have a lower Metric value than the Priate NIC" ""
                     }
                 }
