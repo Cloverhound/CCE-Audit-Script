@@ -251,7 +251,7 @@ Get-Content $InputServerList | ForEach-Object {
     if (Test-Connection -Count 2 -Quiet $Server){
         WriteResults "Pass" "- Server `'$Server`' Online - Continuing with health chek items" "" $ShwResMsg
         
-        <#
+
 
         #Get OS version
         WriteResults "Default" "Getting OS version" ""
@@ -479,7 +479,7 @@ Get-Content $InputServerList | ForEach-Object {
             }
         }
 
-    #endregion #>
+    #endregion
         
         #region Get ICM info
         #Check that Portico is installed and running
@@ -599,7 +599,7 @@ Get-Content $InputServerList | ForEach-Object {
         $AwDb
         $HdsDb#>
         #endregion Get ICM info
-<#
+
         #Get Cisco ICM Services and Startup Type
         WriteResults "Default" "Checking to see what ICM services are installed and their Startup Type" ""
         InvCmd {Get-WmiObject -Query "select * from win32_service where DisplayName like 'Cisco%'"}  | ForEach-Object {
@@ -659,7 +659,7 @@ Get-Content $InputServerList | ForEach-Object {
                     WriteResults "Pass" "- Volume '$($dataDrive.VolumeName)' with drive letter D: found" "" $ShwResMsg
                 }
             }
-        } #>
+        }
 
 
         #Getting non-loopback nics for following NIC checks
