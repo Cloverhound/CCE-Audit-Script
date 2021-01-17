@@ -1,3 +1,6 @@
+#Written by Mike Jezierski for Cloverhound
+#Work in progress
+
 Set-Location -Path $PSScriptRoot
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
