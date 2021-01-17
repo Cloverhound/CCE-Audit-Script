@@ -1,4 +1,4 @@
-#Written by Mike Jezierski for Cloverhound
+#Written by Mike Jezierski - Cloverhound, Inc.
 #Work in progress
 
 Set-Location -Path $PSScriptRoot
@@ -628,13 +628,13 @@ Get-Content $InputServerList | ForEach-Object {
         $drives | ForEach-Object {$driveDetails += "$($_.DeviceID) $("{0:N2}" -f ($_.FreeSpace / 1GB)) GB Free / $("{0:N2}" -f ($_.Size / 1GB)) GB Total"}
         foreach ($drive in $driveDetails){
             if ($drive -like "*C:*") {
-                WriteResults "Pass" "- $drive" "" $ShwResMsg
+                WriteResults "Pass" "- $drive" ""
             }
             elseif (($Logger)-or($Awhds)) {
-                WriteResults "Pass" "- $drive" "" $ShwResMsg
+                WriteResults "Pass" "- $drive" ""
             }
             else {
-                WriteResults "Warning" "- $drive - This server does not have ICM components that require additional disks" "" $ShwResMsg
+                WriteResults "Warning" "- $drive - This server does not have ICM components that require additional disks" ""
             }
         }
 
