@@ -514,9 +514,7 @@ Get-Content $InputServerList | ForEach-Object {
         $InstancesFound = $IcmRegKeys | Where-Object {($_ -notmatch '\d\d\.\d')-and($_ -notin 'ActiveInstance','Performance','Serviceability','SNMP','SystemSettings','CertMon','Cisco SSL Configuration')}
         If ($InstancesFound.Count -gt 0){
             ForEach ($Instance in $InstancesFound){
-                $InstNum = Invoke-Command -ComputerName $Server -Credential $CredsWin -ArgumentList $Instance {
-                    param($Instance)
-                    Get-ItemProperty -PSPath "HKLM:\SOFTWARE\Cisco Systems, Inc.\ICM\$Instance\CurrentVersion\" | Select-Object -ExpandProperty InstanceNumber}
+                $InstNum = InvCmd  {Get-ItemProperty -PSPath "HKLM:\SOFTWARE\Cisco Systems, Inc.\ICM\$using:Instance\CurrentVersion\" | Select-Object -ExpandProperty InstanceNumber}
                 WriteResults "Pass" "- Found Instance`:$Instance Instance Number`:$InstNum" $ShwResMsg
             }   
         }
