@@ -54,14 +54,31 @@ Function WriteResults ($msgStatus,$String,$ShwResMsg){
     elseif ($msgStatus -eq "Warning") {$HtmlColor = "FFC000"; $ConsColor = "Yellow"}
     else {$HtmlColor = "000000"; $ConsColor = "White"}
     if ($ShwResMsg) {
-        Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`">$String - $msgStatus</font>"
-        Add-Content -Path "$ResultsPath\$CsvFile" "$String,- $msgStatus"
-        Write-Host -ForegroundColor $ConsColor "$String - $msgStatus"
+        if ($ConsColor -eq "White") {
+            Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`"></font>"
+            Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`">$String - $msgStatus</font>"
+            Add-Content -Path "$ResultsPath\$CsvFile" ""
+            Add-Content -Path "$ResultsPath\$CsvFile" "`'$String`',`'- $msgStatus`'"
+            Write-Host -ForegroundColor $ConsColor "`n$String - $msgStatus"
+        }else {
+            Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`">$String - $msgStatus</font>"
+            Add-Content -Path "$ResultsPath\$CsvFile" "`'$String`',`'- $msgStatus`'"
+            Write-Host -ForegroundColor $ConsColor "$String - $msgStatus"
+        }
+        
     }
     else {
-        Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`">$String</font>"
-        Add-Content -Path "$ResultsPath\$CsvFile" "$String,"
-        Write-Host -ForegroundColor $ConsColor $String
+        if ($ConsColor -eq "White") {
+            Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`"></font>"
+            Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`">$String</font>"
+            Add-Content -Path "$ResultsPath\$CsvFile" ""
+            Add-Content -Path "$ResultsPath\$CsvFile" "`'$String`',"
+            Write-Host -ForegroundColor $ConsColor "`n$String"
+        }else {
+            Add-Content "$ResultsPath\$HTMLFile" "<br><font color =`"#$HtmlColor`">$String</font>"
+            Add-Content -Path "$ResultsPath\$CsvFile" "`'$String`',"
+            Write-Host -ForegroundColor $ConsColor "$String"
+        }
     }
 }
 
@@ -125,6 +142,7 @@ function ExecuteSql($sql) {
 
 Function CloseScript {
     CloseHtml
+    Write-Host "Press Enter to close this script"
     $endvar = Read-Host
     Exit
 }
@@ -259,7 +277,7 @@ Get-Content $InputServerList | ForEach-Object {
         $OS = InvCmd {Get-WmiObject -Query "select * from win32_operatingsystem"} | Select-Object @{Name="OS"; Expression={"$($_.Caption)$($_.CSDVersion) $($_.OSArchitecture)"}} | Select-Object -expand OS
         WriteResults "Pass" "- $OS"
 
-        #Get OS License Status
+        #Get OS License Status 
         WriteResults "Default" "Getting OS License Status"
         $OSLic = InvCmd {(Get-WmiObject -Query "select * from SoftwareLicensingProduct"| Select-Object -expand LicenseStatus) -contains 1}
         if ($OSLic -eq "True"){
@@ -464,7 +482,7 @@ Get-Content $InputServerList | ForEach-Object {
             else {
                 WriteResults "Fail" "- $($_.Name) $($_.DisplayName) $($_.DisplayValue)" $ShwResMsg
             }
-        }
+        } 
 
     #endregion
         
@@ -515,7 +533,9 @@ Get-Content $InputServerList | ForEach-Object {
         WriteResults "Default" "Getting Installed Cisco Products"
         $InstalledCiscoProds = InvCmd {Get-ItemProperty "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" | Where-Object {$_.Publisher -like "*cisco*"}}
         foreach ($InstalledCiscoProd in $InstalledCiscoProds){
-            WriteResults "Pass" "- Application`:$($InstalledCiscoProd.DisplayName) - Version`:$($InstalledCiscoProd.DisplayVersion) - Publisher`:$($InstalledCiscoProd.Publisher) - Install Date`:$($InstalledCiscoProd.InstallDate)"
+            $CiscoProdPub = $InstalledCiscoProd.Publisher
+            $CiscoProdPub = $CiscoProdPub -replace ",","."
+            WriteResults "Pass" "- Application`:$($InstalledCiscoProd.DisplayName) - Version`:$($InstalledCiscoProd.DisplayVersion) - Publisher`:$CiscoProdPub - Install Date`:$($InstalledCiscoProd.InstallDate)"
         }
         
 
@@ -680,7 +700,7 @@ Get-Content $InputServerList | ForEach-Object {
             $Ipv6DisReg = $true
         }
         else{
-            WriteResults "Warning" "- IPv6 NOT globally disabled in the registry, must check that it's disabled on NIC's" $ShwResMsg
+            WriteResults "Warning" "- IPv6 NOT globally disabled in the registry - must check that it's disabled on NIC's" $ShwResMsg
             $Ipv6DisReg = $false
         }
 
@@ -985,13 +1005,14 @@ Get-Content $InputServerList | ForEach-Object {
 
                 #Check to see if 'Unidentified network' is set as a 'Private' network
                 WriteResults "Default" "Checking to see if 'Unidentified network' is set as a 'Private' network"
-                $PrivNetProf = InvCmd {Get-NetConnectionProfile} | Where-Object {$_.InterfaceAlias -eq $PrivNic.InterfaceAlias} | Select-Object -ExpandProperty NetworkCategory
-                if ($PrivNetProf -eq 'Private') {
-                    WriteResults "Pass" "- The 'Unidentified network' is set as a `'$PrivNetProf`' network" $ShwResMsg
+                $PrivNetProf = InvCmd {Get-NetConnectionProfile} | Where-Object {$_.InterfaceAlias -eq $PrivNic.InterfaceAlias}
+                $PrivNetProfCat = $PrivNetProf.NetworkCategory
+                if ($PrivNetProfCat -eq 'Private') {
+                    WriteResults "Pass" "- The 'Unidentified network' is set as a `'$PrivNetProfCat`' network" $ShwResMsg
                 }
                 else {
                     WriteResults "Fail" "- The 'Unidentified network' is NOT set as a 'Private' network" $ShwResMsg
-                    WriteResults "Fail" "- It is set to use the `'$PrivNetProf`' profile" $ShwResMsg
+                    WriteResults "Fail" "- It is set to use the `'$PrivNetProfCat`' profile" $ShwResMsg
                 }
             }
             else {
@@ -1064,7 +1085,5 @@ Get-Content $InputServerList | ForEach-Object {
 }
 #endregion
 
-Write-Host "" ; Write-Host "Audit Complete, resluts have been written to the following folder" ; Write-Host ""
-Write-Host $ResultsPath ; Write-Host ""
-Write-Host "Press Enter to close this script"
+Write-Host "`nAudit Complete, resluts have been written to the following folder `n`n$ResultsPath`n"
 CloseScript
