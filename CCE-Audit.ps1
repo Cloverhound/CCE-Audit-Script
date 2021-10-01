@@ -259,7 +259,7 @@ Get-Content $InputServerList | ForEach-Object {
     $CsvFile = "$Server.csv"
     $IcmInstalled=$PorticoRunning=$PrivateNic=$Router=$Logger=$Awhds=$Aw=$Pg=$Cg=$CTIOS=$Dialer=$False
     $LoggerSide=$LoggerDb=$AwDb=$HdsDb=$null
-    $PubNicErr=$PrivNicErr=$VmToolsInstalled=$false
+    $VisNicErr=$PrivNicErr=$VmToolsInstalled=$false
     $OS=$UnidNetNotPriv=$PrivRoutes=$HostEntries=$null
     Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
     Set-Content -Path "$ResultsPath\$CsvFile" $null
@@ -861,24 +861,24 @@ Get-Content $InputServerList | ForEach-Object {
             $Ipv6DisReg = $false
         }
 
-        #Check for proper number of Public NIC's
-        WriteResults "Default" "Checking for the proper number of interfaces named 'Public'"
+        #Check for proper number of Visible NIC's
+        WriteResults "Default" "Checking for the proper number of interfaces named 'Visible'"
         $Nics = InvCmd {Get-NetIPInterface}
         $Ipv4Nics = $Nics | Where-Object -FilterScript {$_.AddressFamily -eq 2}
-        $global:PubNic = $Ipv4Nics | Where-Object {$_.InterfaceAlias -like '*public*'}
+        $global:VisNic = $Ipv4Nics | Where-Object {$_.InterfaceAlias -like '*visible*'}
         $global:PrivNic = $Ipv4Nics | Where-Object {$_.InterfaceAlias -like '*private*'}
-        if ($PubNic){
-            if (!$PubNic.count) {
-                WriteResults "Pass" "- One interface named `'Public`' found" $ShwResMsg
+        if ($VisNic){
+            if (!$VisNic.count) {
+                WriteResults "Pass" "- One interface named `'Visible`' found" $ShwResMsg
             }
             else {
-                WriteResults "Fail" "- $($PubNic.count) interfaces named `'Public`' found" $ShwResMsg
-                $PubNicErr = $true
+                WriteResults "Fail" "- $($VisNic.count) interfaces named `'Visible`' found" $ShwResMsg
+                $VisNicErr = $true
             }
         }
         else {
-            WriteResults "Fail" "- No interface named `'Public`' found" $ShwResMsg
-            $PubNicErr = $true
+            WriteResults "Fail" "- No interface named `'Visible`' found" $ShwResMsg
+            $VisNicErr = $true
         }    
 
         if($Router -or $Logger -or $Pg -or $Cg){
@@ -900,7 +900,7 @@ Get-Content $InputServerList | ForEach-Object {
 
 
         #Getting Network Properties for following checks
-        if (!$PubNicErr -or !$PrivNicErr) {
+        if (!$VisNicErr -or !$PrivNicErr) {
             $DnsClient = InvCmd {Get-DnsClient}
             $NetIpConfig = InvCmd {Get-NetIPConfiguration}
             $NetIpAdd = InvCmd {Get-NetIPAddress}
@@ -908,77 +908,77 @@ Get-Content $InputServerList | ForEach-Object {
             $DnsSvrCnt = 1
         }
 
-        #Verify that only one Public NIC exists
-        if (!$PubNicErr) {
-            #Check if IPv6 is Disabled on Public NIC
-            WriteResults "Default" "Checking to see if IPv6 is disabled on the Public NIC"
-            $PubIpv6En = $NetBindings | Where-Object {($_.Name -eq $PubNic.InterfaceAlias)-and($_.ComponentID -eq 'ms_tcpip6')} | Select-Object -ExpandProperty Enabled
+        #Verify that only one Visible NIC exists
+        if (!$VisNicErr) {
+            #Check if IPv6 is Disabled on Visible NIC
+            WriteResults "Default" "Checking to see if IPv6 is disabled on the Visible NIC"
+            $PubIpv6En = $NetBindings | Where-Object {($_.Name -eq $VisNic.InterfaceAlias)-and($_.ComponentID -eq 'ms_tcpip6')} | Select-Object -ExpandProperty Enabled
             if ($PubIpv6En -eq $false) {
-                WriteResults "Pass" "- TCP IP v6 disabled on 'Public' Interface" $ShwResMsg
+                WriteResults "Pass" "- TCP IP v6 disabled on 'Visible' Interface" $ShwResMsg
             }
             else {
                 if ($Ipv6DisReg) {
-                    WriteResults "Warning" "- IPv6 is ENABLED on 'Public' Interface" $ShwResMsg
+                    WriteResults "Warning" "- IPv6 is ENABLED on 'Visible' Interface" $ShwResMsg
                     WriteResults "Warning" "- however IPv6 is disabled globally in the registry"
                 }
                 else {
-                    WriteResults "Fail" "- TCP IP v6 ENABLED on 'Public' Interface and in the registry" $ShwResMsg
+                    WriteResults "Fail" "- TCP IP v6 ENABLED on 'Visible' Interface and in the registry" $ShwResMsg
                 }
             }
 
-            #Check for proper number of IP Addresses for Public NIC and show Subnet Mask
-            WriteResults "Default" "Checking for proper number of IP Addresses for Public NIC"
-            $PubNicIps = $NetIpAdd | Where-Object {$_.InterfaceAlias -eq $PubNic.InterfaceAlias}
+            #Check for proper number of IP Addresses for Visible NIC and show Subnet Mask
+            WriteResults "Default" "Checking for proper number of IP Addresses for Visible NIC"
+            $VisNicIps = $NetIpAdd | Where-Object {$_.InterfaceAlias -eq $VisNic.InterfaceAlias}
             if ($Router -or $Pg) {
-                WriteResults "Default" "- Server has PG or Router present and should have 2 Public IP addresses"
-                if ($PubNicIps.count -eq 2) {
-                    WriteResults "Pass" "- - Found 2 IP addresses assigned to the Public Interface" $ShwResMsg
-                    foreach ($PubNicIp in $PubNicIps){
-                        WriteResults "Pass" "- - IP:$($PubNicIp.IPAddress)/$($PubNicIp.PrefixLength)"
+                WriteResults "Default" "- Server has PG or Router present and should have 2 Visible IP addresses"
+                if ($VisNicIps.count -eq 2) {
+                    WriteResults "Pass" "- - Found 2 IP addresses assigned to the Visible Interface" $ShwResMsg
+                    foreach ($VisNicIp in $VisNicIps){
+                        WriteResults "Pass" "- - IP:$($VisNicIp.IPAddress)/$($VisNicIp.PrefixLength)"
                     }
                 }
                 else {
-                    if (!$PubNicIps.count) {
-                        WriteResults "Fail" "- - Found only 1 IP addresses assigned to the Public Interface" $ShwResMsg
-                        WriteResults "Fail" "- - IP:$($PubNicIps.IPAddress)/$($PubNicIps.PrefixLength)"
+                    if (!$VisNicIps.count) {
+                        WriteResults "Fail" "- - Found only 1 IP addresses assigned to the Visible Interface" $ShwResMsg
+                        WriteResults "Fail" "- - IP:$($VisNicIps.IPAddress)/$($VisNicIps.PrefixLength)"
                     }
                     else {
-                        WriteResults "Fail" "- - Found more than 2 IP addresses assigned to the Public Interface" $ShwResMsg
-                        foreach ($PubNicIp in $PubNicIps){
-                            WriteResults "Pass" "- - IP:$($PubNicIp.IPAddress)/$($PubNicIp.PrefixLength)"
+                        WriteResults "Fail" "- - Found more than 2 IP addresses assigned to the Visible Interface" $ShwResMsg
+                        foreach ($VisNicIp in $VisNicIps){
+                            WriteResults "Pass" "- - IP:$($VisNicIp.IPAddress)/$($VisNicIp.PrefixLength)"
                         }
                     }
                     
                 }
             }
             else {
-                WriteResults "Default" "- Server has does not have PG or Router present and should have 1 Public IP addresses"
-                if (!$PubNicIps.count) {
-                    WriteResults "Pass" "- - Found 1 IP addresses assigned to the Public Interface" $ShwResMsg
-                    WriteResults "Pass" "- - IP:$($PubNicIp.IPAddress)/$($PubNicIp.PrefixLength)"
+                WriteResults "Default" "- Server has does not have PG or Router present and should have 1 Visible IP addresses"
+                if (!$VisNicIps.count) {
+                    WriteResults "Pass" "- - Found 1 IP addresses assigned to the Visible Interface" $ShwResMsg
+                    WriteResults "Pass" "- - IP:$($VisNicIp.IPAddress)/$($VisNicIp.PrefixLength)"
                 }
                 else {
-                    WriteResults "Fail" "- - Found more than 1 IP addresses assigned to the Public Interface" $ShwResMsg
-                    foreach ($PubNicIp in $PubNicIps){
-                        WriteResults "Pass" "- - IP:$($PubNicIp.IPAddress)/$($PubNicIp.PrefixLength)"
+                    WriteResults "Fail" "- - Found more than 1 IP addresses assigned to the Visible Interface" $ShwResMsg
+                    foreach ($VisNicIp in $VisNicIps){
+                        WriteResults "Pass" "- - IP:$($VisNicIp.IPAddress)/$($VisNicIp.PrefixLength)"
                     }
                 }
             }
 
-            #Check for Default Gateway for Public NIC and NO Default gateway on Private (if applicable)
-            WriteResults "Default" "Checking for Default Gateway for Public NIC"
-            $PubDefGw = $NetIpConfig | Where-Object {$_.InterfaceAlias -eq $PubNic.InterfaceAlias} | Select-Object -ExpandProperty IPv4DefaultGateway
+            #Check for Default Gateway for Visible NIC and NO Default gateway on Private (if applicable)
+            WriteResults "Default" "Checking for Default Gateway for Visible NIC"
+            $PubDefGw = $NetIpConfig | Where-Object {$_.InterfaceAlias -eq $VisNic.InterfaceAlias} | Select-Object -ExpandProperty IPv4DefaultGateway
             if ($PubDefGw) {
-                WriteResults "Pass" "- Default Gateway for Public Network" $ShwResMsg
+                WriteResults "Pass" "- Default Gateway for Visible Network" $ShwResMsg
                 WriteResults "Pass" "- - NIC:`'$($PubDefGw.InterfaceAlias)`' Default Gateway:$($PubDefGw.NextHop)"
             }
             else {
-                WriteResults "Fail" "- NO Default Gateway Configured for Public Network" $ShwResMsg
+                WriteResults "Fail" "- NO Default Gateway Configured for Visible Network" $ShwResMsg
             }
 
-            #Check to see if Public NIC has DNS Servers configured
-            WriteResults "Default" "Checking to see if Public NIC has DNS Servers configured"
-            $PubDnsSvrs = $NetIpConfig | Where-Object {$_.InterfaceAlias -eq $PubNic.InterfaceAlias} | Select-Object -ExpandProperty DNSServer | Where-Object {$_.AddressFamily -eq 2} | Select-Object -ExpandProperty ServerAddresses
+            #Check to see if Visible NIC has DNS Servers configured
+            WriteResults "Default" "Checking to see if Visible NIC has DNS Servers configured"
+            $PubDnsSvrs = $NetIpConfig | Where-Object {$_.InterfaceAlias -eq $VisNic.InterfaceAlias} | Select-Object -ExpandProperty DNSServer | Where-Object {$_.AddressFamily -eq 2} | Select-Object -ExpandProperty ServerAddresses
             if ($PubDnsSvrs) {
                 WriteResults "Pass" "- The following DNS servers have been configured" $ShwResMsg
                 foreach ($PubDnsSvr in $PubDnsSvrs){
@@ -987,33 +987,33 @@ Get-Content $InputServerList | ForEach-Object {
                 }
             }
             else {
-                WriteResults "Fail" "- DNS Servers NOT found for Public NIC" $ShwResMsg
+                WriteResults "Fail" "- DNS Servers NOT found for Visible NIC" $ShwResMsg
             }
 
-            #Check to see if Public NIC is configured to register with DNS
-            WriteResults "Default" "Checking to see if Public NIC is configured to register with DNS"
-            $PubDnsReg = $DnsClient | Where-Object {$_.InterfaceAlias -eq $PubNic.InterfaceAlias} | Select-Object -ExpandProperty RegisterThisConnectionsAddress
+            #Check to see if Visible NIC is configured to register with DNS
+            WriteResults "Default" "Checking to see if Visible NIC is configured to register with DNS"
+            $PubDnsReg = $DnsClient | Where-Object {$_.InterfaceAlias -eq $VisNic.InterfaceAlias} | Select-Object -ExpandProperty RegisterThisConnectionsAddress
             if ($PubDnsReg -eq 'True') {
-                WriteResults "Pass" "- The Public interface is configured to register with DNS" $ShwResMsg
+                WriteResults "Pass" "- The Visible interface is configured to register with DNS" $ShwResMsg
             }
             else {
-                WriteResults "Warning" "- The Public interface is NOT configured to register with DNS" $ShwResMsg
+                WriteResults "Warning" "- The Visible interface is NOT configured to register with DNS" $ShwResMsg
             }
 
-            #Check to see if Public NIC is configured with DNS Suffix
-            WriteResults "Default" "Checking to see if Public NIC is configured with DNS Suffix"
-            $PubDnsSuf = $DnsClient | Where-Object {$_.InterfaceAlias -eq $PubNic.InterfaceAlias} | Select-Object -ExpandProperty ConnectionSpecificSuffix
+            #Check to see if Visible NIC is configured with DNS Suffix
+            WriteResults "Default" "Checking to see if Visible NIC is configured with DNS Suffix"
+            $PubDnsSuf = $DnsClient | Where-Object {$_.InterfaceAlias -eq $VisNic.InterfaceAlias} | Select-Object -ExpandProperty ConnectionSpecificSuffix
             if ($PubDnsSuf) {
-                WriteResults "Pass" "- The Public interface is configured with DNS Suffix" $ShwResMsg
+                WriteResults "Pass" "- The Visible interface is configured with DNS Suffix" $ShwResMsg
                 WriteResults "Pass" "- DNS Suffix`: $PubDnsSuf"
             }
             else {
-                WriteResults "Fail" "- The Public interface is NOT configured with DNS Suffix" $ShwResMsg
+                WriteResults "Fail" "- The Visible interface is NOT configured with DNS Suffix" $ShwResMsg
             }
         }
         else {
-            WriteResults "Fail" "- Public NIC count or Public NIC naming not configured correctly." $ShwResMsg
-            WriteResults "Fail" "- Cannot check for Public NIC configurations"
+            WriteResults "Fail" "- Visible NIC count or Visible NIC naming not configured correctly." $ShwResMsg
+            WriteResults "Fail" "- Cannot check for Visible NIC configurations"
         }
 
         #Check IP Settings for Private NIC on applicable 
@@ -1192,7 +1192,7 @@ Get-Content $InputServerList | ForEach-Object {
         #Check NIC/Interface Priority for Router, Logger and PG servers
         if($Router -or $Logger -or $Pg -or $Cg){
             WriteResults "Default" "Checking to see if NIC Binding Order/Interface Metric is configured properly"
-            if ($PubNicErr -or $PrivNicErr) {
+            if ($VisNicErr -or $PrivNicErr) {
                 WriteResults "Fail" "- NIC count or NIC naming not configured correctly." $ShwResMsg
                 WriteResults "Fail" "- Cannot check for Binding Order or Interface Metric"
             }
@@ -1200,14 +1200,14 @@ Get-Content $InputServerList | ForEach-Object {
                 #2016 NIC Metric Check
                 if ($OS -like "*2016*"){
                     WriteResults "Default" "- Server 2016 Found Checking Interface Metric"
-                    if ($PubNic.InterfaceMetric -lt $PrivNic.InterfaceMetric){
-                        WriteResults "Pass" "- NIC Metric Priority correctly configured - Public NIC:$($PubNic.InterfaceMetric) and Private NIC:$($PrivNic.InterfaceMetric)" $ShwResMsg
+                    if ($VisNic.InterfaceMetric -lt $PrivNic.InterfaceMetric){
+                        WriteResults "Pass" "- NIC Metric Priority correctly configured - Visible NIC:$($VisNic.InterfaceMetric) and Private NIC:$($PrivNic.InterfaceMetric)" $ShwResMsg
                     }
                     
         
                     else{
-                    WriteResults "Fail" "- NIC Metric Priority NOT correctly configured - Public NIC:$($PubNic.InterfaceMetric) and Private NIC:$($PrivNic.InterfaceMetric)" $ShwResMsg
-                        WriteResults "Fail" "- - Public NIC should have a lower Metric value than the Priate NIC"
+                    WriteResults "Fail" "- NIC Metric Priority NOT correctly configured - Visible NIC:$($VisNic.InterfaceMetric) and Private NIC:$($PrivNic.InterfaceMetric)" $ShwResMsg
+                        WriteResults "Fail" "- - Visible NIC should have a lower Metric value than the Priate NIC"
                     }
                 }
 
@@ -1220,16 +1220,16 @@ Get-Content $InputServerList | ForEach-Object {
                     {
                         $DeviceId = $Bind.Split("\")[2]
                         $Adapter = InvCmd {Get-WmiObject Win32_Networkadapter | Where-Object {$_.GUID -like "$using:DeviceId" } | Select-Object -expand NetConnectionId}
-                        if (($Adapter -like '*public*')-or($Adapter -like '*private*')){
+                        if (($Adapter -like '*visible*')-or($Adapter -like '*private*')){
                             $BindingOrder += $Adapter
                         }
                     }
-                    if (($BindingOrder[0] -like '*public*')-and($BindingOrder[1] -like '*private*')){
+                    if (($BindingOrder[0] -like '*visible*')-and($BindingOrder[1] -like '*private*')){
                         WriteResults "Pass" "- Binding Order correctly configured - $($BindingOrder[0]) above $($BindingOrder[1])" $ShwResMsg
                     }
                     else {
                         WriteResults "Fail" "- Binding Order NOT correctly configured - $($BindingOrder[1]) above $($BindingOrder[0])" $ShwResMsg
-                        WriteResults "Fail" "- - the Public NIC should be listed above the Private NIC in the Binding Order"
+                        WriteResults "Fail" "- - the Visible NIC should be listed above the Private NIC in the Binding Order"
                     }
                 }
                 else {
