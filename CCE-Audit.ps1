@@ -16,7 +16,7 @@ $WinCredsCsv = ".\WinCreds.csv"
 $SqlCredsCsv = ".\SqlCreds.csv"
 $HTMLFile = "InitAudit.htm"
 $CsvFile = "InitAudit.csv"
-#$integratedSqlLogin=$true
+$integratedSqlLogin=$true
 $CredsValid = $false
 $ShwResMsg = $true
 $global:HTMLOuputStart = "<html><body><br><b>UCCE/PCCE Server Audit Report.</b></body><html>
@@ -26,9 +26,9 @@ $global:HTMLOuputEnd = "</body></html>"
 while ($SqlCredType -notin "Y","N"){
     Write-Host "Enter " -NoNewline; Write-Host -ForegroundColor Yellow "Y" -NoNewline; Write-Host " to use Integrated authentication for SQL, or enter " -NoNewline
     Write-Host -ForegroundColor Yellow "N" -NoNewline; Write-Host " to use SQL authentication"
-    #$SqlCredType = Read-Host
     #testing with auto setting sql auth
-    $SqlCredType = 'n'
+    $SqlCredType = Read-Host
+    #$SqlCredType = 'n'
     if ($SqlCredType -in "Y","N"){
         if ($SqlCredType -eq "Y"){
             $integratedSqlLogin=$true
@@ -257,10 +257,10 @@ Get-Content $InputServerList | ForEach-Object {
     $global:Server = $_
     $HTMLFile = "$Server.htm"
     $CsvFile = "$Server.csv"
-    $IcmInstalled=$PorticoRunning=$PrivateNic=$Router=$Logger=$Awhds=$Pg=$Cg=$CTIOS=$Dialer=$False
+    $IcmInstalled=$PorticoRunning=$PrivateNic=$Router=$Logger=$Awhds=$Aw=$Pg=$Cg=$CTIOS=$Dialer=$False
     $LoggerSide=$LoggerDb=$AwDb=$HdsDb=$null
-    $PubNicErr=$PrivNicErr=$false
-    $OS=$PrivNetProf=$null
+    $PubNicErr=$PrivNicErr=$VmToolsInstalled=$false
+    $OS=$UnidNetNotPriv=$PrivRoutes=$HostEntries=$null
     Set-Content -Path "$ResultsPath\$HTMLFile" $HTMLOuputStart
     Set-Content -Path "$ResultsPath\$CsvFile" $null
 
@@ -287,15 +287,92 @@ Get-Content $InputServerList | ForEach-Object {
             WriteResults "Fail" "- This copy if Windows is NOT activated" $ShwResMsg
         }
 
+        #Get the domain that the Server is joined to
+        WriteResults "Default" "Getting the domain that the Server is joined to"
+        $CompDomain = InvCmd {Get-WmiObject -Query "select * from Win32_ComputerSystem"} | Select-Object -ExpandProperty Domain
+        WriteResults "Pass" "- $CompDomain"
+
+        #Get VMware Tools install
+        WriteResults "Default" "Getting VMware Tools"
+        $InstalledVmTools = InvCmd {Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" | Where-Object {$_.DisplayName -like "*VMware Tools*"}}
+        foreach ($InstalledVmTool in $InstalledVmTools){
+            $VmToolsInstalled = $true
+            $InstalledVmToolsPub = $InstalledVmTool.Publisher
+            $global:InstalledVmToolsLoc = $InstalledVmTool.InstallLocation
+            $InstalledVmToolsPub = $InstalledVmToolsPub -replace ",","."
+            WriteResults "Pass" "- Application`:$($InstalledVmTool.DisplayName) - Version`:$($InstalledVmTool.DisplayVersion) - Publisher`:$InstalledVmToolsPub - Install Date`:$($InstalledVmTool.InstallDate)"
+        }
+
+        #Verify that VM is not synching time with host
+        WriteResults "Default" "Verifying that VM is not synching time with host"
+        if ($VmToolsInstalled) {
+            $VmTimeSync = InvCmd {cmd /c "$using:InstalledVmToolsLoc\VMwareToolboxCmd.exe" timesync status}
+            if ($VmTimeSync -eq 'Disabled') {
+                WriteResults "Pass" "- VMware Tools is not set to synch VM time with Host time" $ShwResMsg
+            }
+            elseif ($VmTimeSync -eq 'Enabled') {
+                WriteResults "Fail" "- VMware Tools is set to synch VM time with Host time" $ShwResMsg
+            }
+            else {
+                WriteResults "Fail" "- Unable to chec time synch setting with VMware Tools - Must check manually" $ShwResMsg
+            }
+        }
+        else {
+            WriteResults "Fail" "- VMware Tools not found on system - cannot check this parameter" $ShwResMsg
+        }
+
+        #Verify that Host file exists and fetch Host entries
+        WriteResults "Default" "Verifying that Host file exists and fetch Host entries"
+        $HostFile = InvCmd {Test-Path $env:windir\System32\drivers\etc\hosts}
+        if ($HostFile) {
+            $HostFileCont = InvCmd {Get-Content $env:windir\System32\drivers\etc\hosts}
+            $HostEntries = @()
+            foreach ($Line in $HostFileCont)  {
+                if (($line -like "#*")-or($line -eq "")) {}
+                else {
+                    $HostEntries = $HostEntries + $line
+                }
+            }
+            if ($HostEntries.count -gt 0) {
+                WriteResults "Pass" "- Host entries found listed below" $ShwResMsg
+                foreach ($HostEntry in $HostEntries) {
+                    WriteResults "Pass" "- - $HostEntry"
+                }
+            }
+            else {
+                WriteResults "Fail" "- Host file found but no valid entries found in file" $ShwResMsg
+            }
+        }
+        else {
+            WriteResults "Fail" "- Host file NOT found all name resolution will rely in DNS" $ShwResMsg
+        }
+
+        #Verify that UAC is disabled
+        WriteResults "Default" "Verifying that UAC is disabled"
+        $UacGlobFlag = InvCmd {Get-ItemProperty -Path HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System -Name EnableLUA | Select-Object -ExpandProperty EnableLUA}
+        $UacAdminFlag = InvCmd {Get-ItemProperty -Path HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System -Name ConsentPromptBehaviorAdmin | Select-Object -ExpandProperty ConsentPromptBehaviorAdmin}
+        if ($UacGlobFlag -eq 0) {
+            WriteResults "Pass" "- UAC is globally disabled" $ShwResMsg
+        }
+        else {
+            WriteResults "Warning" "- UAC is not globally disabled - checking UAC level for Admin"
+            if ($UacAdminFlag -eq 0) {
+                WriteResults "Pass" "- UAC is disabled for Admins" $ShwResMsg
+            }
+            else {
+                WriteResults "Fail" "- UAC IS enabled" $ShwResMsg
+            }
+        }
+
         #Get the Servers Time Zone
         WriteResults "Default" "Getting Server Time Zone"
-        $timeZone = InvCmd {Get-WmiObject -Query "select * from win32_timezone"} | Select-Object -expand Caption
-        WriteResults "Pass" "- $timeZone"
+        $TimeZone = InvCmd {Get-WmiObject -Query "select * from win32_timezone"} | Select-Object -ExpandProperty Caption
+        WriteResults "Pass" "- $TimeZone"
         
         #Get the server that provides time synchronization for this server
         WriteResults "Default" "Getting Time Server"
-        $timeServer = InvCmd {cmd /c $env:WINDIR\system32\w32tm.exe /query /source}
-        WriteResults "Pass" "- $timeServer"
+        $TimeServer = InvCmd {cmd /c $env:WINDIR\system32\w32tm.exe /query /source}
+        WriteResults "Pass" "- $TimeServer"
         
         #Get Processor Information
         WriteResults "Default" "Getting Processor Type and Core Count"
@@ -306,7 +383,6 @@ Get-Content $InputServerList | ForEach-Object {
         elseif (($Cpu.count)-and($Cpu)) {
             WriteResults "Pass" "- $($Cpu[0].Name) with $($Cpu.count) cores"
         }
-        
         
         #Get RAM size
         WriteResults "Default" "Getting RAM amount"
@@ -463,8 +539,18 @@ Get-Content $InputServerList | ForEach-Object {
             WriteResults "Fail" "- NO Windows Updates have been installed in the last 60 days" $ShwResMsg
         } 
         
-        #Check that TCP offload is Disabled and NIC speed is set to 1Gb Full Duplex
-        WriteResults "Default" "Check to see if TCP Offload and Speed/Duplex setting are configured properly"
+        #Check that TCP offload is Globally Disabled
+        WriteResults "Default" "Checking that TCP offload is Globally Disabled"
+        $TcpOffload = InvCmd {Get-NetOffloadGlobalSetting | Select-Object -ExpandProperty Chimney}
+        if ($TcpOffload -like "*Disabled*") {
+            WriteResults "Pass" "- TCP Offload Globally Disabled" $ShwResMsg
+        }
+        else {
+            WriteResults "Fail" "- TCP NOT Offload Globally Disabled" $ShwResMsg
+        }
+
+        #Check that TCP offload is Disabled on each interface and NIC speed is set to 1Gb Full Duplex
+        WriteResults "Default" "Check to see if TCP Offload and Speed/Duplex setting are configured properly on each interface"
         #Offload settings
         InvCmd {Get-NetAdapterAdvancedProperty -DisplayName "*offload*"} | Where-Object {($_.DisplayName -notlike "*IPv6*")} | ForEach-Object {
             if ($_.DisplayValue -like "*Disabled*"){
@@ -563,8 +649,21 @@ Get-Content $InputServerList | ForEach-Object {
         $MinorIcmVer = $Products.Minor
 
 
-        #Get Installed ICM Components
+        <##Get Installed ICM Components
         WriteResults "Default" "Checking to see what ICM Components are installed"
+        if ($InstancesFound.count -gt 0) {
+            if ($InstancesFound.count -gt 1) {
+                Write-Host "Multiple instances"
+            }
+            else {
+                Write-Host "Single instance found"
+            }
+        }
+        else {
+            Write-Host "No instance found"
+        }#>
+
+        $IcmComponents = @()
         ForEach ($Instance in $InstancesFound){
             MakeWebRequest "https://$Server`:7890/icm-dp/rest/DiagnosticPortal/ListAppServers?InstanceName=$Instance"
             try {$Resp = $WebReq.GetResponse()}
@@ -581,34 +680,54 @@ Get-Content $InputServerList | ForEach-Object {
                     WriteResults "Pass" "- $($Instance) - $($Service) Found" $ShwResMsg
                     if ($Service -like "Router*"){
                         $Router = $true
+                        $RouterSide = $Service.Substring(7,1)
+                        $Component = "Router"+$RouterSide
                     }
                     if ($Service -like "Logger*"){
                         $Logger = $true
                         $LoggerSide = $Service.Substring(7,1)
                         $LoggerDb = "$($Instance)_side$($LoggerSide)"
+                        $Component = "Logger"+$LoggerSide
                     }
                     if ($Service -like "Administration and Data Server*"){
                         $Awhds = $true
                         $AwDb="$($Instance)_awdb"
                         $HdsDb="$($Instance)_hds"
+                        $Component = "Distributor"
+                    }
+                    if ($Service -like "Administration Client*"){
+                        $Aw = $true
+                        $Component = "AW"
                     }
                     if ($Service -like "Peripheral Gateway*"){
                         $Pg = $true
+                        $PgNumSide = $Service | Select-String -Pattern '(?<=(\w+\s){2})(\w+)' | ForEach-Object {$_.Matches.value}
+                        $Component = "PG"+$PgNumSide
                     }
                     if ($Service -like "CTI Server*"){
                         $Cg = $true
+                        $CgNumSide = $Service | Select-String -Pattern '(?<=(\w+\s){2})(\w+)' | ForEach-Object {$_.Matches.value}
+                        $Component = "CG"+$CgNumSide
                     }
-                    if ($Service -like "CTI OS Server*"){
+                    if ($Service -like "CTI OS Server*"){#3
                         $CTIOS = $true
+                        $CtiosNum = $Service | Select-String -Pattern '(?<=(\w+\s){3})(\w+)' | ForEach-Object {$_.Matches.value}
+                        $Component = "CTIOS"+$CtiosNum
                     }
                     if ($Service -like "Outbound Option Dialer*"){
                         $Dialer = $true
+                        $Component = "Dialer"
                     }
+                    $IcmComponents += new-object psobject -property @{Instance=$Instance;Component=$Component}
                 }
                 $reader.Close()
                 $resp.Close()
             }
         }
+        <#foreach ($IcmComponent in $IcmComponents){
+            Write-Host "$($IcmComponent.Instance) $($IcmComponent.Component)"
+        }#>
+#exit
         <#$Router
         $Logger
         $LoggerDb
@@ -621,6 +740,46 @@ Get-Content $InputServerList | ForEach-Object {
         $HdsDb#>
         #endregion Get ICM info
 
+        #Get Component Configurations
+        WriteResults "Default" "Getting ICM Component Configurations"
+        foreach ($IcmComponent in $IcmComponents) {
+            WriteResults "Default" "- $($IcmComponent.Component)"
+            if ($IcmComponent.Component -like "PG*") {
+                $PgVruQRep = $null
+                $PgLogCtrlId = InvCmd {Get-ItemProperty "HKLM:\SOFTWARE\Cisco Systems, Inc.\ICM\$($using:IcmComponent.Instance)\$($using:IcmComponent.Component)\" -Name 'PG_ICID' | Select-Object -ExpandProperty 'PG_ICID'}
+                WriteResults "Pass" "- - Logical Controller ID:$PgLogCtrlId"
+                $PgPerType = InvCmd {Get-ItemProperty "HKLM:\SOFTWARE\Cisco Systems, Inc.\ICM\$($using:IcmComponent.Instance)\$($using:IcmComponent.Component)\" -Name 'Clienttypes' | Select-Object -ExpandProperty 'ClientTypes'}
+                WriteResults "Pass" "- - Peripheral Type:$PgPerType"
+                if ($PgPerType -eq "VRU") {
+                    $PgVruQRep = InvCmd {Get-ItemProperty "HKLM:\SOFTWARE\Cisco Systems, Inc.\ICM\$($using:IcmComponent.Instance)\$($using:IcmComponent.Component)\" -Name 'VRUServiceControlQueueReporting' | Select-Object -ExpandProperty 'VRUServiceControlQueueReporting'}
+                    if ($PgVruQRep -eq 0) {
+                        WriteResults "Pass" "- - VRU Q Rep:Disabled"
+                    }
+                    elseif ($PgVruQRep -eq 1) {
+                        WriteResults "Pass" "- - VRU Q Rep:Enabled"
+                    }
+                }
+                $PgPathPref = InvCmd {Get-ItemProperty "HKLM:\SOFTWARE\Cisco Systems, Inc.\ICM\$($using:IcmComponent.Instance)\$($using:IcmComponent.Component)\DMP\CurrentVersion\" -Name 'PathPreference' | Select-Object -ExpandProperty 'PathPreference'}
+                if ($PgPathPref -eq 0) {
+                    WriteResults "Pass" "- - Side A Prefered"
+                }
+                elseif ($PgPathPref -eq 1) {
+                    WriteResults "Pass" "- - Side B Prefered"
+                }
+                else {
+                    WriteResults "Fail" "- - No Side Preference"
+                }
+                $PgDuplex = InvCmd {Get-ItemProperty "HKLM:\SOFTWARE\Cisco Systems, Inc.\ICM\$($using:IcmComponent.Instance)\$($using:IcmComponent.Component)\NodeManager\CurrentVersion\" -Name 'Duplexed' | Select-Object -ExpandProperty 'Duplexed'}
+                if ($PgDuplex -eq 1) {
+                    WriteResults "Pass" "- - Duplex Mode Enabled"
+                }
+                elseif ($PgDuplex -eq 0) {
+                    WriteResults "Fail" "- - Duplex Mode NOT Enabled"
+                }
+                #Write-Host $IcmComponent.Component $PgPerType $PgLogCtrlId $PgPathPref $PgDuplex $PgVruQRep
+            }
+        }
+#exit
         #Get Cisco ICM Services and Startup Type
         WriteResults "Default" "Checking to see what ICM services are installed and their Startup Type"
         InvCmd {Get-WmiObject -Query "select * from win32_service where DisplayName like 'Cisco%'"}  | ForEach-Object {
@@ -668,7 +827,7 @@ Get-Content $InputServerList | ForEach-Object {
         #Get Data drive (D:) Volume name for AW-HDS and Logger servers
         if (($Awhds)-or($Logger)){
             WriteResults "Default" "Getting Data Drive (D:) Volume Name"
-            $dataDrive = InvCmd {Get-WmiObject win32_logicaldisk} | Where-Object {($_.DeviceID -eq 'D:')-and($_.DriveType -eq 3)}
+            $dataDrive = InvCmd {Get-WmiObject win32_logicaldisk | Where-Object {($_.DeviceID -eq 'D:')-and($_.DriveType -eq 3)}}
             if (!$dataDrive) {
                 WriteResults "Fail" "- NO data volume with drive letter D: found" $ShwResMsg
             } 
@@ -706,8 +865,8 @@ Get-Content $InputServerList | ForEach-Object {
         WriteResults "Default" "Checking for the proper number of interfaces named 'Public'"
         $Nics = InvCmd {Get-NetIPInterface}
         $Ipv4Nics = $Nics | Where-Object -FilterScript {$_.AddressFamily -eq 2}
-        $PubNic = $Ipv4Nics | Where-Object {$_.InterfaceAlias -like '*public*'}
-        $PrivNic = $Ipv4Nics | Where-Object {$_.InterfaceAlias -like '*private*'}
+        $global:PubNic = $Ipv4Nics | Where-Object {$_.InterfaceAlias -like '*public*'}
+        $global:PrivNic = $Ipv4Nics | Where-Object {$_.InterfaceAlias -like '*private*'}
         if ($PubNic){
             if (!$PubNic.count) {
                 WriteResults "Pass" "- One interface named `'Public`' found" $ShwResMsg
@@ -838,7 +997,7 @@ Get-Content $InputServerList | ForEach-Object {
                 WriteResults "Pass" "- The Public interface is configured to register with DNS" $ShwResMsg
             }
             else {
-                WriteResults "Fail" "- The Public interface is NOT configured to register with DNS" $ShwResMsg
+                WriteResults "Warning" "- The Public interface is NOT configured to register with DNS" $ShwResMsg
             }
 
             #Check to see if Public NIC is configured with DNS Suffix
@@ -948,7 +1107,7 @@ Get-Content $InputServerList | ForEach-Object {
 
                 #Check for Static Route entry for Private NIC
                 WriteResults "Default" "Checking to see Persistent Static Route for Prive NIC is present"
-                $PrivRoutes = InvCmd {Get-NetRoute} | Where-Object {($_.InterfaceAlias -eq $PrivNic.InterfaceAlias) -and ($_.Protocol -eq 'NetMgmt')}
+                $PrivRoutes = InvCmd {Get-NetRoute | Where-Object {($_.InterfaceAlias -eq $using:PrivNic.InterfaceAlias) -and ($_.Protocol -eq 'NetMgmt')}}
                 if (($PrivRoutes)-and(!$PrivRoutes.count)) {
                     WriteResults "Pass" "- One Static Route found for Private Network" $ShwResMsg
                     WriteResults "Pass" "- - NIC:`'$($PrivRoutes.InterfaceAlias)`' Destination:$($PrivRoutes.DestinationPrefix) Next Hop:$($PrivRoutes.NextHop)"
@@ -1003,14 +1162,22 @@ Get-Content $InputServerList | ForEach-Object {
 
                 #Check to see if 'Unidentified network' is set as a 'Private' network
                 WriteResults "Default" "Checking to see if 'Unidentified network' is set as a 'Private' network"
-                $PrivNetProf = InvCmd {Get-NetConnectionProfile} | Where-Object {$_.InterfaceAlias -eq $PrivNic.InterfaceAlias}
-                $PrivNetProfCat = $PrivNetProf.NetworkCategory
-                if ($PrivNetProfCat -eq 'Private') {
-                    WriteResults "Pass" "- The 'Unidentified network' is set as a `'$PrivNetProfCat`' network" $ShwResMsg
+                $UnidNetNotPriv = InvCmd {
+                    $UnidNetNotPriv = $false
+                    try {
+                    Get-NetConnectionProfile -NetworkCategory 'Private' -Name 'Unidentified network' -ErrorAction Stop | Out-Null
+                    }
+                    catch{
+                        $UnidNetNotPriv = $true
+                    }
+                    Write-Output $UnidNetNotPriv
+                }
+                if (!$UnidNetNotPriv) {
+                    WriteResults "Pass" "- The 'Unidentified network' is set to use the 'Private' network profile" $ShwResMsg
                 }
                 else {
                     WriteResults "Fail" "- The 'Unidentified network' is NOT set as a 'Private' network" $ShwResMsg
-                    WriteResults "Fail" "- It is set to use the `'$PrivNetProfCat`' profile" $ShwResMsg
+                    WriteResults "Fail" "- It is either not configured or set to use the 'Public' profile"
                 }
             }
             else {
@@ -1047,12 +1214,12 @@ Get-Content $InputServerList | ForEach-Object {
                 #2012 R2 Binding Order Check
                 elseif ($OS -like "*2012*"){
                     WriteResults "Default" "- Server 2012 Found Checking Binding Order"
-                    $Binding = InvCmd {Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Linkage"} | Select-Object -expand Bind
+                    $Binding = InvCmd {Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Linkage" | Select-Object -expand Bind}
                     $BindingOrder = @()
                     ForEach ($Bind in $Binding)
                     {
                         $DeviceId = $Bind.Split("\")[2]
-                        $Adapter = InvCmd {Get-WmiObject Win32_Networkadapter} | Where-Object {$_.GUID -like "$DeviceId" } | Select-Object -expand NetConnectionId
+                        $Adapter = InvCmd {Get-WmiObject Win32_Networkadapter | Where-Object {$_.GUID -like "$using:DeviceId" } | Select-Object -expand NetConnectionId}
                         if (($Adapter -like '*public*')-or($Adapter -like '*private*')){
                             $BindingOrder += $Adapter
                         }
